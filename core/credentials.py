@@ -6,4 +6,4 @@ class BittensorCredentials:
 
 @dataclass
 class Credentials:
-    bittensor: BittensorCredentials
+    bittensor_sn8: BittensorCredentials
