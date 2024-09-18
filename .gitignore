@@ -24,3 +24,4 @@ raw_signals/tradingview/*
 !raw_signals/bittensor/.gitkeep
 !raw_signals/tradingview/.gitkeep
 */__pycache__/*
+**/credentials.json
