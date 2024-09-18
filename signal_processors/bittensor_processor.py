@@ -3,8 +3,9 @@ import aiohttp
 import ujson
 import os
 from datetime import datetime
-from core.credentials import Credentials, BittensorCredentials
 from signal_processors.credentials import load_credentials, save_credentials, ensure_bittensor_credentials
+from core.bittensor_signals import BTTSN8MinerSignal, BTTSN8Position, BTTSN8Order, BTTSN8TradePair
+from dataclasses import asdict
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
 RAW_SIGNALS_DIR = "raw_signals/bittensor"  # Directory to store raw signals
@@ -51,6 +52,87 @@ def store_signal_on_disk(data):
     print(f"Raw signal stored at {file_path}")
 
 
+def process_signals(data):
+    """Process the raw signal data."""
+    
+    # Process signals
+    if data is None:
+        return
+    
+    # Iterate over each miner hotkey
+    signals = []
+    for miner_hotkey, miner_positions in data.items():
+        print(f"Processing miner hotkey: {miner_hotkey}")
+
+        # Extract miner signal metadata
+        all_time_returns = miner_positions['all_time_returns']
+        n_positions = miner_positions['n_positions']
+        percentage_profitable = miner_positions['percentage_profitable']
+        positions = []
+
+        for position_data in miner_positions.get('positions', []):
+            # Process trade pair
+            trade_pair_data = position_data['trade_pair']
+            trade_pair = BTTSN8TradePair(
+                symbol=trade_pair_data[0],
+                pair=trade_pair_data[1],
+                spread=trade_pair_data[2],
+                volume=trade_pair_data[3],
+                decimal_places=trade_pair_data[4]
+            )
+
+            # Process orders
+            orders = []
+            for order_data in position_data['orders']:
+                order = BTTSN8Order(
+                    leverage=order_data['leverage'],
+                    order_type=order_data['order_type'],
+                    order_uuid=order_data['order_uuid'],
+                    price=order_data['price'],
+                    price_sources=order_data['price_sources'],
+                    processed_ms=order_data['processed_ms'],
+                    position_uuid=position_data['position_uuid'],
+                    position_type=position_data['position_type'],
+                    net_leverage=position_data['net_leverage'],
+                    rank=order_data['rank'] if 'rank' in order_data else 0,
+                    muid=order_data['muid'] if 'muid' in order_data else '',
+                    trade_pair=trade_pair
+                )
+                orders.append(order)
+
+            # Process position
+            position = BTTSN8Position(
+                average_entry_price=position_data['average_entry_price'],
+                close_ms=position_data.get('close_ms'),
+                current_return=position_data['current_return'],
+                is_closed_position=position_data['is_closed_position'],
+                miner_hotkey=position_data['miner_hotkey'],
+                net_leverage=position_data['net_leverage'],
+                open_ms=position_data['open_ms'],
+                orders=orders,
+                position_type=position_data['position_type'],
+                position_uuid=position_data['position_uuid'],
+                return_at_close=position_data.get('return_at_close'),
+                trade_pair=trade_pair,
+                risk_management=position_data.get('risk_management', {})
+            )
+            positions.append(position)
+
+        # Create BTTSN8MinerSignal instance
+        miner_signal = BTTSN8MinerSignal(
+            all_time_returns=all_time_returns,
+            n_positions=n_positions,
+            percentage_profitable=percentage_profitable,
+            positions=positions,
+            thirty_day_returns=miner_positions.get('thirty_day_returns')
+        )
+
+        signals.append(miner_signal)
+        print(f"Fetched Bittensor signal: {str(miner_signal)[:100]}...")  # Truncate for cleanliness
+
+    return signals
+
+
 async def fetch_bittensor_signal():
     """Main function to fetch Bittensor signals and store them."""
     credentials = prompt_and_load_credentials()
@@ -59,10 +141,13 @@ async def fetch_bittensor_signal():
     
     # Fetch signals
     positions_data = await fetch_bittensor_signals(api_key, endpoint)
-    
-    if positions_data:
-        print("Fetched Bittensor signals:", str(positions_data)[:100])  # Truncate for cleanliness
-        store_signal_on_disk(positions_data)  # Store the raw data on disk
+    if positions_data is not None:
+        # Store them to disk
+        store_signal_on_disk(positions_data)
+
+        # Process the signals for validation
+        process_signals(positions_data)
+
     else:
         print("No data received.")
 
