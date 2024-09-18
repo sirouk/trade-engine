@@ -1,3 +1,20 @@
 .vscode/settings.json
 .venv
 .venv/*
+
+
+
+# Ignore everything in raw_signals
+raw_signals/*
+
+# But keep the folder structure
+!raw_signals/bittensor/
+!raw_signals/tradingview/
+
+# Add a rule to ignore all files in bittensor and tradingview directories
+raw_signals/bittensor/*
+raw_signals/tradingview/*
+
+# Ensure .gitkeep (or any placeholder) is included to keep the directory structure
+!raw_signals/bittensor/.gitkeep
+!raw_signals/tradingview/.gitkeep
