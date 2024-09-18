@@ -1,7 +1,12 @@
+# Ignore VSCode settings
 .vscode/settings.json
+
+# Ignore the virtual environment
 .venv
 .venv/*
 
+# Ignore Python egg-info directories
+*.egg-info/
 
 
 # Ignore everything in raw_signals
