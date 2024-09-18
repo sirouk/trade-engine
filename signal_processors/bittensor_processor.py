@@ -91,11 +91,7 @@ def process_signals(data):
                     price=order_data['price'],
                     price_sources=order_data['price_sources'],
                     processed_ms=order_data['processed_ms'],
-                    position_uuid=position_data['position_uuid'],
-                    position_type=position_data['position_type'],
-                    net_leverage=position_data['net_leverage'],
                     rank=order_data['rank'] if 'rank' in order_data else 0,
-                    muid=order_data['muid'] if 'muid' in order_data else '',
                     trade_pair=trade_pair
                 )
                 orders.append(order)
@@ -113,8 +109,7 @@ def process_signals(data):
                 position_type=position_data['position_type'],
                 position_uuid=position_data['position_uuid'],
                 return_at_close=position_data.get('return_at_close'),
-                trade_pair=trade_pair,
-                risk_management=position_data.get('risk_management', {})
+                trade_pair=trade_pair
             )
             positions.append(position)
 
