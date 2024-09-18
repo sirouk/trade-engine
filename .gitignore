@@ -23,3 +23,4 @@ raw_signals/tradingview/*
 # Ensure .gitkeep (or any placeholder) is included to keep the directory structure
 !raw_signals/bittensor/.gitkeep
 !raw_signals/tradingview/.gitkeep
+*/__pycache__/*
