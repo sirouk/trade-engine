@@ -19,11 +19,7 @@ class BTTSN8Order:
     price: float
     price_sources: List[str]
     processed_ms: int
-    position_uuid: str
-    position_type: str  # "FLAT", "OPEN", etc.
-    net_leverage: float
     rank: int
-    muid: str
     trade_pair: BTTSN8TradePair
 
 
@@ -41,7 +37,6 @@ class BTTSN8Position:
     position_uuid: str
     return_at_close: Optional[float]  # None if open
     trade_pair: BTTSN8TradePair
-    risk_management: Optional[Dict[str, float]] = field(default_factory=dict)  # e.g., {"stop_loss": 0.01, "take_profit": 0.05}
 
 
 @dataclass
