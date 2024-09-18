@@ -31,26 +31,28 @@ def save_credentials(credentials: Credentials, file_path: str):
         ujson.dump(data, f, indent=4)
 
 
-def prompt_for_changes() -> bool:
+def prompt_for_changes(skip_prompt: bool = False) -> bool:
     """Ask the user if they want to change the credentials."""
-    while True:
+    while not skip_prompt:
         change = input("Credentials are already set. Do you want to change them? (yes/no): ").strip().lower()
         if change in ['yes', 'no']:
             return change == 'yes'
         print("Please enter 'yes' or 'no'.")
 
+    return False
 
-def ensure_bittensor_credentials(credentials: Credentials) -> Credentials:
+
+def ensure_bittensor_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
     """Prompt for Bittensor credentials if they don't exist, or ask to change them."""
     # Ask if the user wants to change existing credentials
-    if credentials.bittensor_sn8.api_key and credentials.bittensor_sn8.endpoint and not prompt_for_changes():
+    if credentials.bittensor_sn8.api_key and credentials.bittensor_sn8.endpoint and not prompt_for_changes(skip_prompt):
         return credentials
 
-    if not credentials.bittensor_sn8.api_key or prompt_for_changes():
+    if not credentials.bittensor_sn8.api_key or prompt_for_changes(skip_prompt):
         api_key = input("Enter your API key for Bittensor SN8: ")
         credentials.bittensor_sn8.api_key = api_key
     
-    if not credentials.bittensor_sn8.endpoint or prompt_for_changes():
+    if not credentials.bittensor_sn8.endpoint or prompt_for_changes(skip_prompt):
         endpoint = input("Enter the Bittensor endpoint URL: ")
         credentials.bittensor_sn8.endpoint = endpoint
     

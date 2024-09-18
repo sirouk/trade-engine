@@ -7,14 +7,13 @@ from core.credentials import Credentials, BittensorCredentials
 from signal_processors.credentials import load_credentials, save_credentials, ensure_bittensor_credentials
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
-BITTENSOR_URL = "https://sn8.wildsage.io/miner-positions"
 RAW_SIGNALS_DIR = "raw_signals/bittensor"  # Directory to store raw signals
 
 
 def prompt_and_load_credentials():
     """Ensure all credentials are present, and load them if necessary."""
     credentials = load_credentials(CREDENTIALS_FILE)
-    credentials = ensure_bittensor_credentials(credentials)
+    credentials = ensure_bittensor_credentials(credentials, skip_prompt=True)
     
     # Save any updated credentials back to the file
     save_credentials(credentials, CREDENTIALS_FILE)
@@ -22,13 +21,13 @@ def prompt_and_load_credentials():
     return credentials
 
 
-async def fetch_bittensor_signals(api_key: str):
-    """Fetch signals from Bittensor subnet 8 validator endpoint."""
+async def fetch_bittensor_signals(api_key: str, endpoint: str):
+    """Fetch signals from the Bittensor validator endpoint."""
     headers = {'Content-Type': 'application/json'}
     data = {'api_key': api_key}
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(BITTENSOR_URL, json=data, headers=headers) as response:
+        async with session.get(endpoint, json=data, headers=headers) as response:
             if response.status == 200:
                 return await response.json(loads=ujson.loads)  # Use ujson for speed
             print(f"Failed to fetch data: {response.status}")
@@ -56,9 +55,10 @@ async def fetch_bittensor_signal():
     """Main function to fetch Bittensor signals and store them."""
     credentials = prompt_and_load_credentials()
     api_key = credentials.bittensor_sn8.api_key
+    endpoint = credentials.bittensor_sn8.endpoint  # Get the endpoint from the credentials
     
     # Fetch signals
-    positions_data = await fetch_bittensor_signals(api_key)
+    positions_data = await fetch_bittensor_signals(api_key, endpoint)
     
     if positions_data:
         print("Fetched Bittensor signals:", str(positions_data)[:100])  # Truncate for cleanliness
