@@ -70,6 +70,7 @@ def process_signals(data):
         percentage_profitable = miner_positions['percentage_profitable']
         positions = []
 
+        # Process positions
         for position_data in miner_positions.get('positions', []):
             # Process trade pair
             trade_pair_data = position_data['trade_pair']
@@ -81,7 +82,7 @@ def process_signals(data):
                 decimal_places=trade_pair_data[4]
             )
 
-            # Process orders
+            # Process orders in position
             orders = []
             for order_data in position_data['orders']:
                 order = BTTSN8Order(
