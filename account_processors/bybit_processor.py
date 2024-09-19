@@ -1,9 +1,9 @@
 import asyncio
 from pybit.unified_trading import HTTP
-from core.credentials import load_credentials, CREDENTIALS_FILE  # Load your unified credentials
+from core.credentials import load_bybit_credentials
 
 # Load Bybit API key and secret from your credentials file
-credentials = load_credentials(CREDENTIALS_FILE)
+credentials = load_bybit_credentials()
 
 BYBIT_API_KEY = credentials.bybit.api_key
 BYBIT_API_SECRET = credentials.bybit.api_secret
