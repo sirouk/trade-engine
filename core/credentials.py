@@ -14,6 +14,7 @@ class BybitCredentials:
 class BloFinCredentials:
     api_key: str
     api_secret: str
+    api_passphrase: str
 
 @dataclass
 class Credentials:
@@ -34,7 +35,7 @@ def load_credentials(file_path: str) -> Credentials:
         return Credentials(
             bittensor_sn8=BittensorCredentials(api_key="", endpoint=""),
             bybit=BybitCredentials(api_key="", api_secret=""),
-            blofin=BloFinCredentials(api_key="", api_secret="")
+            blofin=BloFinCredentials(api_key="", api_secret="", api_passphrase="")
         )
 
     with open(file_path, 'r') as f:
@@ -55,7 +56,8 @@ def load_credentials(file_path: str) -> Credentials:
         ),
         blofin=BloFinCredentials(
             api_key=blofin_creds.get('api_key', ""),
-            api_secret=blofin_creds.get('api_secret', "")
+            api_secret=blofin_creds.get('api_secret', ""),
+            api_passphrase=blofin_creds.get('api_passphrase', "")
         )
     )
 
@@ -114,7 +116,7 @@ def ensure_bittensor_credentials(credentials: Credentials, skip_prompt: bool = F
 
 def ensure_blofin_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
     """Prompt for BloFin API credentials if they don't exist, or ask to change them."""
-    if credentials.blofin.api_key and credentials.blofin.api_secret and not prompt_for_changes("BloFin", skip_prompt):
+    if credentials.blofin.api_key and credentials.blofin.api_secret and credentials.blofin.api_passphrase and not prompt_for_changes("BloFin", skip_prompt):
         return credentials
 
     if not credentials.blofin.api_key or prompt_for_changes("BloFin API key", skip_prompt):
@@ -124,6 +126,10 @@ def ensure_blofin_credentials(credentials: Credentials, skip_prompt: bool = Fals
     if not credentials.blofin.api_secret or prompt_for_changes("BloFin API secret", skip_prompt):
         api_secret = input("Enter your BloFin API secret: ")
         credentials.blofin.api_secret = api_secret
+
+    if not credentials.blofin.api_passphrase or prompt_for_changes("BloFin API passphrase", skip_prompt):
+        passphrase = input("Enter your BloFin API passphrase: ")
+        credentials.blofin.api_passphrase = passphrase
 
     save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
