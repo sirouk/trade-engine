@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import ujson
 import os
 from core.credentials import Credentials, BittensorCredentials, BybitCredentials
