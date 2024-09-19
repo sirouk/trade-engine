@@ -41,7 +41,7 @@ Before running the trade engine, you will need to provide your credentials for B
 To set up the credentials, run the following command, which will prompt you to enter your API key(s):
 
 ```bash
-python3 credentials.py
+python3 config/credentials.py
 ```
 
 You will be prompted to enter the required API keys and endpoints, for example:
