@@ -5,12 +5,10 @@ from core.credentials import load_bybit_credentials
 # Load Bybit API key and secret from your credentials file
 credentials = load_bybit_credentials()
 
-BYBIT_API_KEY = credentials.bybit.api_key
-BYBIT_API_SECRET = credentials.bybit.api_secret
 TESTNET = False  # Change to False for production
 
 # Initialize the Bybit client
-bybit_client = HTTP(api_key=BYBIT_API_KEY, api_secret=BYBIT_API_SECRET, testnet=TESTNET)
+bybit_client = HTTP(api_key=credentials.bybit.api_key, api_secret=credentials.bybit.api_secret, testnet=TESTNET)
 
 async def fetch_open_positions():
     try:
