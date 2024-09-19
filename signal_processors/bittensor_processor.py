@@ -3,14 +3,14 @@ import aiohttp
 import ujson
 import os
 from datetime import datetime
-from config.credentials import load_credentials, ensure_bittensor_credentials
+from core.credentials import load_credentials, ensure_bittensor_credentials
 from core.bittensor_signals import BTTSN8MinerSignal, BTTSN8Position, BTTSN8Order, BTTSN8TradePair
 
 CREDENTIALS_FILE = "credentials.json"
 RAW_SIGNALS_DIR = "raw_signals/bittensor"  # Directory to store raw signals
 
 
-def prompt_and_load_credentials():
+def load_bittensor_credentials():
     """Ensure all credentials are present, and load them if necessary."""
     credentials = load_credentials(CREDENTIALS_FILE)
     assert ensure_bittensor_credentials(credentials, skip_prompt=True)
@@ -127,7 +127,7 @@ def process_signals(data):
 
 async def fetch_bittensor_signal():
     """Main function to fetch Bittensor signals and store them."""
-    credentials = prompt_and_load_credentials()
+    credentials = load_bittensor_credentials()
     api_key = credentials.bittensor_sn8.api_key
     endpoint = credentials.bittensor_sn8.endpoint  # Get the endpoint from the credentials
     
