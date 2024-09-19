@@ -100,6 +100,12 @@ def ensure_bittensor_credentials(credentials: Credentials, skip_prompt: bool = F
 
     return credentials
 
+def load_bittensor_credentials():
+    """Ensure all credentials are present, and load them if necessary."""
+    credentials = load_credentials(CREDENTIALS_FILE)
+    assert ensure_bittensor_credentials(credentials, skip_prompt=True)
+    
+    return credentials
 
 def prompt_for_credentials(file_path: str):
     """Ensure all necessary credentials are present by prompting the user."""
