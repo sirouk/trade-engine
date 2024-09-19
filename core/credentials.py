@@ -81,6 +81,7 @@ def ensure_bybit_credentials(credentials: Credentials, skip_prompt: bool = False
         api_secret = input("Enter your Bybit API secret: ")
         credentials.bybit.api_secret = api_secret
 
+    save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 
 
@@ -98,12 +99,20 @@ def ensure_bittensor_credentials(credentials: Credentials, skip_prompt: bool = F
         endpoint = input("Enter the Bittensor endpoint URL: ")
         credentials.bittensor_sn8.endpoint = endpoint
 
+    save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 
 def load_bittensor_credentials():
     """Ensure all credentials are present, and load them if necessary."""
     credentials = load_credentials(CREDENTIALS_FILE)
     assert ensure_bittensor_credentials(credentials, skip_prompt=True)
+    
+    return credentials
+
+def load_bybit_credentials():
+    """Ensure all credentials are present, and load them if necessary."""
+    credentials = load_credentials(CREDENTIALS_FILE)
+    assert ensure_bybit_credentials(credentials, skip_prompt=True)
     
     return credentials
 
