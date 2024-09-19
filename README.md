@@ -36,20 +36,20 @@ rm -rf .venv
 
 ## Adding Credentials
 
-Before running the trade engine, you will need to provide your credentials for Bittensor or any other services. The credentials are stored in a JSON file (`signal_processors/credentials.json`).
+Before running the trade engine, you will need to provide your credentials for Bittensor or any other services. The credentials are stored in a JSON file (`credentials.json`).
 
 To set up the credentials, run the following command, which will prompt you to enter your API key(s):
 
 ```bash
-python3 signal_processors/credentials.py
+python3 credentials.py
 ```
 
-You will be prompted to enter the required API key for Bittensor SN8:
+You will be prompted to enter the required API keys and endpoints, for example:
 
 ```bash
 Enter your API key for Bittensor SN8: <your-api-key>
 ```
 
-Once you provide the necessary credentials, they will be saved in `signal_processors/credentials.json`.
+Once you provide the necessary credentials, they will be saved in the root directory in `credentials.json`.
 
 If you need to update the credentials later, simply rerun the same command and re-enter the credentials as needed.
