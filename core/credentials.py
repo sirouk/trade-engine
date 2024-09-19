@@ -1,7 +1,4 @@
-import ujson
-import os
 from dataclasses import dataclass
-
 
 @dataclass
 class BittensorCredentials:
@@ -18,6 +15,9 @@ class Credentials:
     bittensor_sn8: BittensorCredentials
     bybit: BybitCredentials
 
+
+import ujson
+import os
 
 CREDENTIALS_FILE = "credentials.json"
 
