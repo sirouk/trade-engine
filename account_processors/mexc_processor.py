@@ -9,7 +9,10 @@ from core.unified_position import UnifiedPosition
 credentials = load_mexc_credentials()
 
 # Initialize MEXC Futures client
-futures_client = futures.HTTP(api_key=credentials.mexc.api_key, api_secret=credentials.mexc.api_secret)
+futures_client = futures.HTTP(
+    api_key=credentials.mexc.api_key, 
+    api_secret=credentials.mexc.api_secret
+)
 
 
 async def fetch_balance(instrument="USDT"):

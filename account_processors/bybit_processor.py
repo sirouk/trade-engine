@@ -154,8 +154,8 @@ async def main():
     tickers = await fetch_tickers(symbol="BTCUSDT")  # Fetch market tickers
     print(tickers)
     
-    order_results = await place_limit_order()
-    print(order_results)
+    # order_results = await place_limit_order()
+    # print(order_results)
     
     #await fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     positions = await fetch_and_map_positions(symbol="BTCUSDT")
