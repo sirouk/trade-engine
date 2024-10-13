@@ -3,6 +3,7 @@ import datetime
 from kucoin_futures.client import UserData, Trade, Market # https://github.com/Kucoin/kucoin-futures-python-sdk
 from core.credentials import load_kucoin_credentials
 from core.utils.modifiers import round_to_tick_size
+from core.unified_position import UnifiedPosition
 
 # Load KuCoin Futures API credentials from the credentials file
 credentials = load_kucoin_credentials()
@@ -37,21 +38,32 @@ async def fetch_balance(instrument="USDT"):
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
 
-async def fetch_open_positions():
+async def fetch_open_positions(symbol):
     """Fetch open futures positions."""
     try:
-        positions = trade_client.get_all_position()
+        positions = trade_client.get_position_details(symbol=symbol)
         print(f"Open Positions: {positions}")
+        return positions
     except Exception as e:
         print(f"Error fetching open positions: {str(e)}")
 
 async def fetch_open_orders():
     """Fetch open futures orders."""
     try:
-        open_orders = trade_client.get_open_order_details(symbol="XBTUSDTM")
-        print(f"Open Orders: {open_orders}")
+        orders = trade_client.get_open_order_details(symbol="XBTUSDTM")
+        print(f"Open Orders: {orders}")
+        return orders
     except Exception as e:
         print(f"Error fetching open orders: {str(e)}")
+
+async def fetch_tickers(symbol):
+    try:
+        # Get tickers for BTC-USDT
+        tickers = market_client.get_ticker(symbol=symbol)
+        print(f"Tickers: {tickers}")
+        return tickers
+    except Exception as e:
+        print(f"Error fetching tickers: {str(e)}")
 
 async def place_limit_order():
     """Place a limit order on KuCoin Futures."""
@@ -90,18 +102,50 @@ async def place_limit_order():
     except Exception as e:
         print(f"Error placing limit order: {str(e)}")
 
-async def fetch_tickers(symbol):
+def map_kucoin_position_to_unified(position: dict) -> UnifiedPosition:
+    """Convert a KuCoin position response into a UnifiedPosition object."""
+    size = abs(float(position.get("currentQty", 0)))  # Handle long/short positions
+    direction = "long" if float(position.get("currentQty", 0)) > 0 else "short"
+
+    return UnifiedPosition(
+        symbol=position["symbol"],
+        size=size,
+        average_entry_price=float(position.get("avgEntryPrice", 0)),
+        leverage=float(position.get("leverage", 1)),
+        direction=direction,
+        unrealized_pnl=float(position.get("unrealisedPnl", 0)),
+        exchange="KuCoin"
+    )
+
+async def fetch_and_map_kucoin_positions(symbol: str):
+    """Fetch and map KuCoin positions to UnifiedPosition."""
     try:
-        # Get tickers for BTC-USDT
-        tickers = market_client.get_ticker(symbol=symbol)
-        print(f"Tickers: {tickers}")
+        response = trade_client.get_position_details(symbol=symbol)
+        positions = response.get("data", [])
+
+        # Convert each position to UnifiedPosition
+        unified_positions = [
+            map_kucoin_position_to_unified(pos) 
+            for pos in positions 
+            if float(pos.get("currentQty", 0)) != 0
+        ]
+
+        for unified_position in unified_positions:
+            print(f"Unified Position: {unified_position}")
+
+        return unified_positions
     except Exception as e:
-        print(f"Error fetching tickers: {str(e)}")
+        print(f"Error mapping KuCoin positions: {str(e)}")
+        return []
 
 
 async def main():
-    await fetch_balance(instrument="USDT")      # Fetch futures balance
-    #await fetch_open_positions()       # Fetch open positions
+    #balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
+    
+    #await fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
+    positions = await fetch_and_map_kucoin_positions(symbol="XBTUSDTM")
+    print(positions)
+    
     #await fetch_open_orders()          # Fetch open orders
     #await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
     #await place_limit_order()
