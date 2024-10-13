@@ -130,7 +130,9 @@ async def fetch_and_map_positions(symbol: str):
         positions = response.get("result", {}).get("list", [])
 
         unified_positions = [
-            map_bybit_position_to_unified(pos) for pos in positions if float(pos.get("size", 0)) > 0
+            map_bybit_position_to_unified(pos) 
+            for pos in positions 
+            if float(pos.get("size", 0)) > 0
         ]
 
         for unified_position in unified_positions:
