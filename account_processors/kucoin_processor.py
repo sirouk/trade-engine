@@ -2,6 +2,7 @@ import asyncio
 import datetime
 from kucoin_futures.client import UserData, Trade, Market # https://github.com/Kucoin/kucoin-futures-python-sdk
 from core.credentials import load_kucoin_credentials
+from core.utils.modifiers import round_to_tick_size
 
 # Load KuCoin Futures API credentials from the credentials file
 credentials = load_kucoin_credentials()
@@ -53,17 +54,31 @@ async def place_limit_order():
         symbol="XBTUSDTM"
         side="buy"
         price=60000
-        size=0.01
-        lever=1
+        size=0.1
+        leverage=3
+        order_type="limit"
+        margin_mode="ISOLATED" # ISOLATED, CROSS, default: ISOLATED
         client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+        # Fetch symbol details to confirm correct size increment and tick size
+        symbol_details = market_client.get_contract_detail(symbol)
+        min_size = float(symbol_details["lotSize"])
+        tick_size = float(symbol_details["tickSize"])
+        print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
+
+        # Adjust size to be at least the minimum lot size and align with tick size precision
+        size = max(size, min_size)
+        size = round_to_tick_size(size, tick_size)
         
         order_id = trade_client.create_limit_order(
-            symbol=symbol, 
-            side=side, 
-            price=price, 
+            symbol=symbol,
+            side=side,
+            price=price,
             size=size,
-            lever=lever,
-            clientOid=client_oid,
+            lever=leverage,
+            orderType=order_type,
+            marginMode=margin_mode,
+            clientOid=client_oid
         )
         print(f"Limit Order Placed: {order_id}")
     except Exception as e:
@@ -79,11 +94,11 @@ async def fetch_tickers(symbol):
 
 
 async def main():
-    await fetch_balance()      # Fetch futures balance
-    await fetch_open_positions()       # Fetch open positions
-    await fetch_open_orders()          # Fetch open orders
-    await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
-    #await place_limit_order()
+    # await fetch_balance()      # Fetch futures balance
+    # await fetch_open_positions()       # Fetch open positions
+    # await fetch_open_orders()          # Fetch open orders
+    # await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
+    await place_limit_order()
     
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())

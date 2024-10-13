@@ -2,6 +2,7 @@ import asyncio
 import datetime
 from pybit.unified_trading import HTTP # https://github.com/bybit-exchange/pybit/
 from core.credentials import load_bybit_credentials
+from core.utils.modifiers import round_to_tick_size
 
 # Load Bybit API key and secret from your credentials file
 credentials = load_bybit_credentials()
@@ -45,66 +46,65 @@ async def fetch_tickers(symbol):
     except Exception as e:
         print(f"Error fetching tickers: {str(e)}")
 
+async def get_symbol_details(symbol):
+    """Fetch instrument details including tick size and lot size."""
+    instruments = bybit_client.get_instruments_info(category="linear", symbol=symbol)
+    # print(instruments)
+    # quit()
+    for instrument in instruments["result"]["list"]:
+        if instrument["symbol"] == symbol:
+            return float(instrument["lotSizeFilter"]["minOrderQty"]), float(instrument["lotSizeFilter"]["qtyStep"])
+    raise ValueError(f"Symbol {symbol} not found.")
+
 async def place_limit_order():
     """Place a limit order on Bybit."""
     try:
         # Test limit order
         category="linear"
-        symbol='BTCUSDT'
-        side='Buy'
+        symbol="BTCUSDT"
+        side="Buy"
         price=60000
-        qty=0.01
+        size=0.01
         leverage=1
-        order_type='Limit'
-        time_in_force='GoodTillCancel'
+        order_type="Limit"
+        time_in_force="IOC"
         reduce_only=False
         close_on_trigger=False
         client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+        
+        # Get correct lot size and tick size for the symbol
+        min_size, tick_size = await get_symbol_details(symbol)
+        print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
+
+        # Adjust size to meet minimum lot size and align with tick size
+        size = max(size, min_size)
+        size = round_to_tick_size(size, tick_size)
         
         order = bybit_client.place_order(
             category=category,
             symbol=symbol,
             side=side,
             price=price,
-            qty=qty,
+            qty=size,
             leverage=leverage,
             order_type=order_type,
-            time_in_force=time_in_force,
+            time_in_force=time_in_force, # GTC, IOC, FOK, PostOnly (use IOK)
             reduce_only=reduce_only,
             close_on_trigger=close_on_trigger,
-            orderLinkId=client_oid
+            orderLinkId=client_oid,
+            positionIdx=0, # one-way mode
         )
         print(f"Limit Order Placed: {order}")
     except Exception as e:
         print(f"Error placing limit order: {str(e)}")
-
-async def set_leverage():
-    """Set leverage for a given symbol."""
-    try:
-        symbol="BTCUSDT"
-        buy_leverage="5"
-        sell_leverage="5"
-
-        response = bybit_client.set_leverage(
-            category="linear",
-            symbol=symbol,
-            
-            # Under one-way mode, buyLeverage must be the same as sellLeverage
-            buyLeverage=buy_leverage,
-            sellLeverage=sell_leverage
-        )
-        print(f"Leverage Set: {response}")
-    except Exception as e:
-        print(f"Error setting leverage: {str(e)}")
         
 
 async def main():
-    await fetch_balance()            # Fetch account balance
-    await fetch_open_positions()     # Fetch open positions
-    await fetch_open_orders()        # Fetch open orders
-    await fetch_tickers(symbol="BTCUSDT")            # Fetch market tickers
-    #await place_limit_order()        # Place a limit order
-    await set_leverage()  # Set leverage
+    # await fetch_balance()            # Fetch account balance
+    # await fetch_open_positions()     # Fetch open positions
+    # await fetch_open_orders()        # Fetch open orders
+    # await fetch_tickers(symbol="BTCUSDT")            # Fetch market tickers
+    await place_limit_order()        # Place a limit order
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())

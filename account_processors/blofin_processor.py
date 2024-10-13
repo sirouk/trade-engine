@@ -2,6 +2,7 @@ import asyncio
 import datetime
 from blofin import BloFinClient # https://github.com/nomeida/blofin-python
 from core.credentials import load_blofin_credentials
+from core.utils.modifiers import round_to_tick_size
 
 # Load BloFin API key and secret from your credentials file
 credentials = load_blofin_credentials()
@@ -17,7 +18,7 @@ blofin_client = BloFinClient(
 async def fetch_balance():
     try:
         # Get futures balance
-        balance = blofin_client.account.get_balance(account_type='futures')
+        balance = blofin_client.account.get_balance(account_type="futures")
         print(f"Account Balance: {balance}")
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
@@ -38,19 +39,35 @@ async def fetch_open_orders():
     except Exception as e:
         print(f"Error fetching open orders: {str(e)}")
 
+async def get_symbol_details(symbol):
+    """Fetch instrument details including tick size and lot size."""
+    instruments = blofin_client.public.get_instruments(inst_type="SWAP")
+    for instrument in instruments["data"]:
+        if instrument["instId"] == symbol:
+            return float(instrument["lotSize"]), float(instrument["tickSize"])
+    raise ValueError(f"Symbol {symbol} not found.")
+
 async def place_limit_order():
     """Place a limit order on BloFin."""
     try:
         # Test limit order
         symbol="BTC-USDT"
-        side='buy'
-        position_side='long'
+        side="buy"
+        position_side="net" # net for one-way, long/short for hedge mode
         price=60000
-        size=1
-        margin_mode='cross'
-        order_type='limit'
-        leverage=1
+        size=0.1
+        leverage=3
+        order_type="limit"
+        margin_mode="cross"
         client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+        
+        # Fetch the correct lot size and tick size for the symbol
+        min_size, tick_size = await get_symbol_details(symbol)
+        print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
+
+        # Adjust size to be at least the minimum and align with tick size precision
+        size = max(size, min_size)
+        size = round_to_tick_size(size, tick_size)
         
         order = blofin_client.trading.place_order(
             inst_id=symbol,
@@ -58,10 +75,10 @@ async def place_limit_order():
             position_side=position_side,
             price=price,
             size=size,
-            margin_mode=margin_mode,
-            order_type=order_type,
             leverage=leverage,
-            client_order_id=client_order_id,
+            order_type=order_type,
+            margin_mode=margin_mode,
+            clientOrderId=client_order_id,
         )
         print(f"Limit Order Placed: {order}")
     except Exception as e:
@@ -80,8 +97,8 @@ async def main():
     #await fetch_balance()           # Fetch account balance
     #await fetch_open_positions()    # Fetch open positions
     #await fetch_open_orders()       # Fetch open orders
-    #await fetch_tickers(symbol="XBTUSDTM")           # Fetch market tickers
+    #await fetch_tickers(symbol="BTC-USDT")           # Fetch market tickers
     await place_limit_order()       # Place a limit order
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
