@@ -8,81 +8,82 @@ from core.unified_position import UnifiedPosition
 # Load MEXC Futures API credentials from the credentials file
 credentials = load_mexc_credentials()
 
-# Initialize MEXC Futures clients
-futures_client = futures.HTTP(
-    api_key=credentials.mexc.api_key, 
-    api_secret=credentials.mexc.api_secret
-)
+# Initialize MEXC Futures client
+futures_client = futures.HTTP(api_key=credentials.mexc.api_key, api_secret=credentials.mexc.api_secret)
+
 
 async def fetch_balance(instrument="USDT"):
-    """Fetch futures account balance."""
+    """Fetch the futures account balance for a specific instrument."""
     try:
-        response = futures_client.account_information()
-        balances = response.get('assets', [])
-        if balance := next(
-            (b for b in balances if b['asset'] == instrument), None
-        ):
-            available_balance = balance.get("marginBalance", 0)
-            print(f"Account Balance: {available_balance}")
-            return available_balance
-        else:
-            print(f"No balance found for {instrument}.")
-            return 0
+        # Fetch the asset details for the given instrument
+        balance = futures_client.asset(currency=instrument)
+
+        # Check if the API call was successful
+        if not balance.get("success", False):
+            raise ValueError(f"Failed to fetch assets: {balance}")
+
+        # Extract the data from the response
+        balance = balance.get("data", {})
+        balance = balance.get("availableBalance", 0)
+
+        print(f"Account Balance for {instrument}: {balance}")
+        return balance
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
 
 async def fetch_open_positions(symbol):
     """Fetch open futures positions."""
     try:
-        response = futures_client.position_info()
-        positions = [p for p in response if p['symbol'] == symbol]
-        print(f"Open Positions: {positions}")
-        return positions
+        response = futures_client.open_positions(symbol=symbol)
+        print(f"Open Positions: {response}")
+        return response.get("data", [])
     except Exception as e:
         print(f"Error fetching open positions: {str(e)}")
 
 async def fetch_open_orders(symbol):
     """Fetch open futures orders."""
     try:
-        orders = futures_client.open_orders(symbol=symbol)
-        print(f"Open Orders: {orders}")
-        return orders
+        response = futures_client.open_orders(symbol=symbol)
+        print(f"Open Orders: {response}")
+        return response.get("data", [])
     except Exception as e:
         print(f"Error fetching open orders: {str(e)}")
 
 async def fetch_tickers(symbol):
     """Fetch ticker information."""
     try:
-        ticker = futures_client.market_price(symbol=symbol)
-        print(f"Ticker: {ticker}")
-        return ticker
+        response = futures_client.ticker(symbol=symbol)
+        print(f"Ticker: {response}")
+        return response.get("data", {})
     except Exception as e:
         print(f"Error fetching tickers: {str(e)}")
 
 async def place_limit_order():
     """Place a limit order on MEXC Futures."""
     try:
-        symbol = "BTCUSDT"
-        side = "buy"
+        symbol = "BTC_USDT"
+        side = 1  # 1 for open long, 3 for open short
         price = 60000
-        size = 0.1
+        volume = 0.1
         leverage = 3
-        order_type = "limit"
+        order_type = 1  # Limit order
         client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
-        # Adjust size to meet minimum and tick size requirements
-        min_size = 0.001  # Example: adjust based on MEXC API details
+        # Adjust volume to meet minimum size and tick size requirements
+        min_size = 0.001  # Adapt to MEXC's requirements
         tick_size = 0.0001
-        size = max(size, min_size)
-        size = round_to_tick_size(size, tick_size)
+        volume = max(volume, min_size)
+        volume = round_to_tick_size(volume, tick_size)
 
-        order = futures_client.place_order(
+        order = futures_client.order(
             symbol=symbol,
+            price=price,
+            vol=volume,
             side=side,
-            order_type=order_type,
-            price=str(price),
-            quantity=str(size),
-            client_order_id=client_oid
+            type=order_type,
+            open_type=1,  # 1 for isolated margin
+            leverage=leverage,
+            external_oid=client_oid
         )
         print(f"Limit Order Placed: {order}")
     except Exception as e:
@@ -90,28 +91,27 @@ async def place_limit_order():
 
 def map_mexc_position_to_unified(position: dict) -> UnifiedPosition:
     """Convert a MEXC position response into a UnifiedPosition object."""
-    size = abs(float(position.get("positionAmt", 0)))
-    direction = "long" if float(position.get("positionAmt", 0)) > 0 else "short"
+    size = abs(float(position.get("vol", 0)))
+    direction = "long" if int(position.get("posSide", 1)) == 1 else "short"
 
     return UnifiedPosition(
         symbol=position["symbol"],
         size=size,
-        average_entry_price=float(position.get("entryPrice", 0)),
+        average_entry_price=float(position.get("avgPrice", 0)),
         leverage=float(position.get("leverage", 1)),
         direction=direction,
-        unrealized_pnl=float(position.get("unrealizedProfit", 0)),
+        unrealized_pnl=float(position.get("unrealizedPnl", 0)),
         exchange="MEXC"
     )
 
 async def fetch_and_map_positions(symbol: str):
     """Fetch and map MEXC positions to UnifiedPosition."""
     try:
-        response = futures_client.position_info()
-        positions = [p for p in response if p['symbol'] == symbol]
+        response = futures_client.open_positions(symbol=symbol)
+        positions = response.get("data", [])
 
         unified_positions = [
-            map_mexc_position_to_unified(pos)
-            for pos in positions if float(pos.get("positionAmt", 0)) != 0
+            map_mexc_position_to_unified(pos) for pos in positions if float(pos.get("vol", 0)) != 0
         ]
 
         for unified_position in unified_positions:
@@ -123,20 +123,23 @@ async def fetch_and_map_positions(symbol: str):
         return []
 
 async def main():
-    
-    balance = await fetch_balance(instrument="USDT")  # Fetch futures balance
+ 
+    balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
     print(balance)
-
-    orders = await fetch_open_orders(symbol="BTCUSDT")  # Fetch open orders
+    
+    orders = await fetch_open_orders()          # Fetch open orders
     print(orders)
-
-    tickers = await fetch_tickers(symbol="BTCUSDT")  # Fetch ticker information
+    
+    tickers = await fetch_tickers(symbol="BTC_USDT")  # Fetch market tickers
     print(tickers)
-
-    await place_limit_order()  # Place a limit order
-
-    positions = await fetch_and_map_positions(symbol="BTCUSDT")
+    
+    # order_results = await place_limit_order()
+    # print(order_results)
+    
+    #await fetch_open_positions(symbol="BTC_USDT")       # Fetch open positions
+    positions = await fetch_and_map_positions(symbol="BTC_USDT")
     print(positions)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
