@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 from kucoin_futures.client import UserData, Trade, Market # https://github.com/Kucoin/kucoin-futures-python-sdk
 from core.credentials import load_kucoin_credentials
 
@@ -54,6 +55,7 @@ async def place_limit_order():
         price=60000
         size=0.01
         lever=1
+        client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
         
         order_id = trade_client.create_limit_order(
             symbol=symbol, 
@@ -61,6 +63,7 @@ async def place_limit_order():
             price=price, 
             size=size,
             lever=lever,
+            clientOid=client_oid,
         )
         print(f"Limit Order Placed: {order_id}")
     except Exception as e:

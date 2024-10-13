@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 from pybit.unified_trading import HTTP # https://github.com/bybit-exchange/pybit/
 from core.credentials import load_bybit_credentials
 
@@ -48,16 +49,17 @@ async def place_limit_order():
     """Place a limit order on Bybit."""
     try:
         # Test limit order
-        category="linear",
-        symbol='BTCUSDT',
-        side='Buy',
-        price=60000,
-        qty=0.01,
-        leverage=1,
-        order_type='Limit',
-        time_in_force='GoodTillCancel',
-        reduce_only=False,
+        category="linear"
+        symbol='BTCUSDT'
+        side='Buy'
+        price=60000
+        qty=0.01
+        leverage=1
+        order_type='Limit'
+        time_in_force='GoodTillCancel'
+        reduce_only=False
         close_on_trigger=False
+        client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
         
         order = bybit_client.place_order(
             category=category,
@@ -69,12 +71,32 @@ async def place_limit_order():
             order_type=order_type,
             time_in_force=time_in_force,
             reduce_only=reduce_only,
-            close_on_trigger=close_on_trigger
+            close_on_trigger=close_on_trigger,
+            orderLinkId=client_oid
         )
         print(f"Limit Order Placed: {order}")
     except Exception as e:
         print(f"Error placing limit order: {str(e)}")
 
+async def set_leverage():
+    """Set leverage for a given symbol."""
+    try:
+        symbol="BTCUSDT"
+        buy_leverage="5"
+        sell_leverage="5"
+
+        response = bybit_client.set_leverage(
+            category="linear",
+            symbol=symbol,
+            
+            # Under one-way mode, buyLeverage must be the same as sellLeverage
+            buyLeverage=buy_leverage,
+            sellLeverage=sell_leverage
+        )
+        print(f"Leverage Set: {response}")
+    except Exception as e:
+        print(f"Error setting leverage: {str(e)}")
+        
 
 async def main():
     await fetch_balance()            # Fetch account balance
@@ -82,6 +104,7 @@ async def main():
     await fetch_open_orders()        # Fetch open orders
     await fetch_tickers(symbol="BTCUSDT")            # Fetch market tickers
     #await place_limit_order()        # Place a limit order
+    await set_leverage()  # Set leverage
 
 if __name__ == '__main__':
     asyncio.run(main())

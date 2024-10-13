@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 from blofin import BloFinClient # https://github.com/nomeida/blofin-python
 from core.credentials import load_blofin_credentials
 
@@ -42,12 +43,14 @@ async def place_limit_order():
     try:
         # Test limit order
         symbol="BTC-USDT"
-        side='buy',
-        position_side='long',
-        price=60000,
-        size=0.01
-        margin_mode='cross',
-        order_type='limit',
+        side='buy'
+        position_side='long'
+        price=60000
+        size=1
+        margin_mode='cross'
+        order_type='limit'
+        leverage=1
+        client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
         
         order = blofin_client.trading.place_order(
             inst_id=symbol,
@@ -57,6 +60,8 @@ async def place_limit_order():
             size=size,
             margin_mode=margin_mode,
             order_type=order_type,
+            leverage=leverage,
+            client_order_id=client_order_id,
         )
         print(f"Limit Order Placed: {order}")
     except Exception as e:
@@ -72,11 +77,11 @@ async def fetch_tickers(symbol):
 
 
 async def main():
-    await fetch_balance()           # Fetch account balance
-    await fetch_open_positions()    # Fetch open positions
-    await fetch_open_orders()       # Fetch open orders
-    await fetch_tickers(symbol="XBTUSDTM")           # Fetch market tickers
-    #await place_limit_order()       # Place a limit order
+    #await fetch_balance()           # Fetch account balance
+    #await fetch_open_positions()    # Fetch open positions
+    #await fetch_open_orders()       # Fetch open orders
+    #await fetch_tickers(symbol="XBTUSDTM")           # Fetch market tickers
+    await place_limit_order()       # Place a limit order
 
 if __name__ == '__main__':
     asyncio.run(main())
