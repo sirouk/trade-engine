@@ -4,159 +4,188 @@ from kucoin_futures.client import UserData, Trade, Market # https://github.com/K
 from core.credentials import load_kucoin_credentials
 from core.utils.modifiers import round_to_tick_size
 from core.unified_position import UnifiedPosition
-
-# Load KuCoin Futures API credentials from the credentials file
-credentials = load_kucoin_credentials()
-
-# Initialize KuCoin Futures clients
-user_client = UserData(
-    key=credentials.kucoin.api_key, 
-    secret=credentials.kucoin.api_secret, 
-    passphrase=credentials.kucoin.api_passphrase,
-)
-
-trade_client = Trade(
-    key=credentials.kucoin.api_key, 
-    secret=credentials.kucoin.api_secret, 
-    passphrase=credentials.kucoin.api_passphrase,
-)
-
-market_client = Market()
+from core.unified_ticker import UnifiedTicker
 
 
-async def fetch_balance(instrument="USDT"):
-    """Fetch futures account balance."""
-    try:
-        balance = user_client.get_account_overview(currency=instrument)
-        # {'accountEquity': 0.58268157, 'unrealisedPNL': 0.0, 'marginBalance': 0.58268157, 'positionMargin': 0.0, 'orderMargin': 0.0, 'frozenFunds': 0.0, 'availableBalance': 0.58268157, 'currency': 'USDT'}
+class KuCoin:
+    def __init__(self):
         
-        # get coin balance available to trade
-        balance = balance.get("availableBalance", 0)
-                
-        print(f"Account Balance: {balance}")
-        return balance
-    except Exception as e:
-        print(f"Error fetching balance: {str(e)}")
-
-async def fetch_open_positions(symbol):
-    """Fetch open futures positions."""
-    try:
-        positions = trade_client.get_position_details(symbol=symbol)
-        print(f"Open Positions: {positions}")
-        return positions
-    except Exception as e:
-        print(f"Error fetching open positions: {str(e)}")
-
-async def fetch_open_orders(symbol):
-    """Fetch open futures orders."""
-    try:
-        orders = trade_client.get_open_order_details(symbol=symbol)
-        print(f"Open Orders: {orders}")
-        return orders
-    except Exception as e:
-        print(f"Error fetching open orders: {str(e)}")
-
-async def fetch_tickers(symbol):
-    try:
-        # Get tickers for BTC-USDT
-        tickers = market_client.get_ticker(symbol=symbol)
-        print(f"Tickers: {tickers}")
-        return tickers
-    except Exception as e:
-        print(f"Error fetching tickers: {str(e)}")
-
-async def place_limit_order():
-    """Place a limit order on KuCoin Futures."""
-    try:
-        # Test limit order
-        symbol="XBTUSDTM"
-        side="buy"
-        price=60000
-        size=0.1
-        leverage=3
-        order_type="limit"
-        margin_mode="ISOLATED" # ISOLATED, CROSS, default: ISOLATED
-        client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-
-        # Fetch symbol details to confirm correct size increment and tick size
-        symbol_details = market_client.get_contract_detail(symbol)
-        min_size = float(symbol_details["lotSize"])
-        tick_size = float(symbol_details["tickSize"])
-        print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
-
-        # Adjust size to be at least the minimum lot size and align with tick size precision
-        size = max(size, min_size)
-        size = round_to_tick_size(size, tick_size)
+        self.exchange_name = "KuCoin"
         
-        order_id = trade_client.create_limit_order(
-            symbol=symbol,
-            side=side,
-            price=price,
-            size=size,
-            lever=leverage,
-            orderType=order_type,
-            marginMode=margin_mode,
-            clientOid=client_oid
+        # Load KuCoin Futures API credentials from the credentials file
+        self.credentials = load_kucoin_credentials()
+
+        # Initialize KuCoin Futures clients
+        self.user_client = UserData(
+            key=self.credentials.kucoin.api_key, 
+            secret=self.credentials.kucoin.api_secret, 
+            passphrase=self.credentials.kucoin.api_passphrase,
         )
-        print(f"Limit Order Placed: {order_id}")
-    except Exception as e:
-        print(f"Error placing limit order: {str(e)}")
 
-def map_kucoin_position_to_unified(position: dict) -> UnifiedPosition:
-    """Convert a KuCoin position response into a UnifiedPosition object."""
-    size = abs(float(position.get("currentQty", 0)))  # Handle long/short positions
-    direction = "long" if float(position.get("currentQty", 0)) > 0 else "short"
+        self.trade_client = Trade(
+            key=self.credentials.kucoin.api_key, 
+            secret=self.credentials.kucoin.api_secret, 
+            passphrase=self.credentials.kucoin.api_passphrase,
+        )
 
-    return UnifiedPosition(
-        symbol=position["symbol"],
-        size=size,
-        average_entry_price=float(position.get("avgEntryPrice", 0)),
-        leverage=float(position.get("leverage", 1)),
-        direction=direction,
-        unrealized_pnl=float(position.get("unrealisedPnl", 0)),
-        exchange="KuCoin"
-    )
+        self.market_client = Market()
 
-async def fetch_and_map_positions(symbol: str):
-    """Fetch and map KuCoin positions to UnifiedPosition."""
-    try:
-        response = trade_client.get_position_details(symbol=symbol)
-        positions = response.get("data", [])
 
-        # Convert each position to UnifiedPosition
-        unified_positions = [
-            map_kucoin_position_to_unified(pos) 
-            for pos in positions 
-            if float(pos.get("currentQty", 0)) != 0
-        ]
+    async def fetch_balance(self, instrument="USDT"):
+        """Fetch futures account balance."""
+        try:
+            balance = self.user_client.get_account_overview(currency=instrument)
+            # {'accountEquity': 0.58268157, 'unrealisedPNL': 0.0, 'marginBalance': 0.58268157, 'positionMargin': 0.0, 'orderMargin': 0.0, 'frozenFunds': 0.0, 'availableBalance': 0.58268157, 'currency': 'USDT'}
+            
+            # get coin balance available to trade
+            balance = balance.get("availableBalance", 0)
+            print(f"Account Balance for {instrument}: {balance}")
+            return balance
+        except Exception as e:
+            print(f"Error fetching balance: {str(e)}")
 
-        for unified_position in unified_positions:
-            print(f"Unified Position: {unified_position}")
+    async def fetch_open_positions(self, symbol):
+        """Fetch open futures positions."""
+        try:
+            positions = self.trade_client.get_position_details(symbol=symbol)
+            print(f"Open Positions: {positions}")
+            return positions
+        except Exception as e:
+            print(f"Error fetching open positions: {str(e)}")
 
-        print(f"Unified Positions: {unified_positions}")
-        return unified_positions
-    except Exception as e:
-        print(f"Error mapping KuCoin positions: {str(e)}")
-        return []
+    async def fetch_open_orders(self, symbol):
+        """Fetch open futures orders."""
+        try:
+            orders = self.trade_client.get_open_order_details(symbol=symbol)
+            print(f"Open Orders: {orders}")
+            return orders
+        except Exception as e:
+            print(f"Error fetching open orders: {str(e)}")
+
+    async def fetch_tickers(self, symbol):
+        try:
+            tickers = self.market_client.get_ticker(symbol=symbol)
+            contract = self.market_client.get_contract_detail(symbol=symbol)
+            
+            print(f"Tickers: {tickers}")
+            return UnifiedTicker(
+                symbol=symbol,
+                bid=float(tickers.get("bestBidPrice", 0)),
+                ask=float(tickers.get("bestAskPrice", 0)),
+                last=float(tickers.get("price", 0)),
+                volume=float(contract.get("volumeOf24h", 0)),
+                exchange=self.exchange_name
+            )
+        except Exception as e:
+            print(f"Error fetching tickers from KuCoin: {str(e)}")
+
+    async def get_symbol_details(self, symbol):
+        """Fetch instrument details including tick size and lot size."""
+        instruments = self.market_client.get_contract_detail(symbol)        
+        for instrument in instruments["data"]:
+            if instrument["instId"] == symbol:
+                return float(instrument["lotSize"]), float(instrument["tickSize"])
+        raise ValueError(f"Symbol {symbol} not found.")
+    
+    async def place_limit_order(self, ):
+        """Place a limit order on KuCoin Futures."""
+        try:
+            # Test limit order
+            symbol="XBTUSDTM"
+            side="buy"
+            price=60000
+            size=0.1
+            leverage=3
+            order_type="limit"
+            margin_mode="ISOLATED" # ISOLATED, CROSS, default: ISOLATED
+            client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+            # Fetch symbol details to confirm correct size increment and tick size
+            min_size, tick_size = self.get_symbol_details(symbol)
+            print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
+
+            # Adjust size to be at least the minimum lot size and align with tick size precision
+            size = max(size, min_size)
+            size = round_to_tick_size(size, tick_size)
+            
+            order_id = self.trade_client.create_limit_order(
+                symbol=symbol,
+                side=side,
+                price=price,
+                size=size,
+                lever=leverage,
+                orderType=order_type,
+                marginMode=margin_mode,
+                clientOid=client_oid
+            )
+            print(f"Limit Order Placed: {order_id}")
+        except Exception as e:
+            print(f"Error placing limit order: {str(e)}")
+
+    def map_kucoin_position_to_unified(self, position: dict) -> UnifiedPosition:
+        """Convert a KuCoin position response into a UnifiedPosition object."""
+        size = abs(float(position.get("currentQty", 0)))  # Handle long/short positions
+        direction = "long" if float(position.get("currentQty", 0)) > 0 else "short"
+
+        return UnifiedPosition(
+            symbol=position["symbol"],
+            size=size,
+            average_entry_price=float(position.get("avgEntryPrice", 0)),
+            leverage=float(position.get("leverage", 1)),
+            direction=direction,
+            unrealized_pnl=float(position.get("unrealisedPnl", 0)),
+            exchange=self.exchange_name,
+        )
+
+    async def fetch_and_map_positions(self, symbol: str):
+        """Fetch and map KuCoin positions to UnifiedPosition."""
+        try:
+            response = self.trade_client.get_position_details(symbol=symbol)
+            positions = response.get("data", [])
+
+            # Convert each position to UnifiedPosition
+            unified_positions = [
+                self.map_kucoin_position_to_unified(pos) 
+                for pos in positions 
+                if float(pos.get("currentQty", 0)) != 0
+            ]
+
+            for unified_position in unified_positions:
+                print(f"Unified Position: {unified_position}")
+
+            print(f"Unified Positions: {unified_positions}")
+            return unified_positions
+        except Exception as e:
+            print(f"Error mapping KuCoin positions: {str(e)}")
+            return []
 
 
 async def main():
     
-    balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
-    #print(balance)
+    # Start a time
+    start_time = datetime.datetime.now()
     
-    orders = await fetch_open_orders(symbol="XBTUSDTM")          # Fetch open orders
-    #print(orders)
+    kucoin = KuCoin()
     
-    tickers = await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
-    #print(tickers)
+    balance = await kucoin.fetch_balance(instrument="USDT")      # Fetch futures balance
+    print(balance)
+
+    tickers = await kucoin.fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
+    print(tickers)
     
-    # order_results = await place_limit_order()
+    orders = await kucoin.fetch_open_orders(symbol="XBTUSDTM")          # Fetch open orders
+    #print(orders)    
+    
+    # order_results = await kucoin.place_limit_order()
     # #print(order_results)
     
-    #await fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
-    positions = await fetch_and_map_positions(symbol="XBTUSDTM")
+    #await kucoin.fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
+    positions = await kucoin.fetch_and_map_positions(symbol="XBTUSDTM")
     #print(positions)
+    
+    # End time
+    end_time = datetime.datetime.now()
+    print(f"Time taken: {end_time - start_time}")
     
 if __name__ == "__main__":
     asyncio.run(main())
