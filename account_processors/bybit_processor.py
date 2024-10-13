@@ -143,16 +143,23 @@ async def fetch_and_map_positions(symbol: str):
         print(f"Error mapping Bybit positions: {str(e)}")
         return []
 
-async def main():
-    #balance = await fetch_balance(instrument="USDT")            # Fetch account balance
-
-    #await fetch_open_positions(symbol="BTCUSDT")     # Fetch open positions
+async def main():   
+    
+    balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
+    print(balance)
+    
+    orders = await fetch_open_orders()          # Fetch open orders
+    print(orders)
+    
+    tickers = await fetch_tickers(symbol="BTCUSDT")  # Fetch market tickers
+    print(tickers)
+    
+    order_results = await place_limit_order()
+    print(order_results)
+    
+    #await fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     positions = await fetch_and_map_positions(symbol="BTCUSDT")
     print(positions)
-
-    #await fetch_open_orders()        # Fetch open orders
-    #await fetch_tickers(symbol="BTCUSDT")            # Fetch market tickers
-    #await place_limit_order()        # Place a limit order
-
+    
 if __name__ == "__main__":
     asyncio.run(main())

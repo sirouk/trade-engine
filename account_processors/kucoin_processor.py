@@ -117,7 +117,7 @@ def map_kucoin_position_to_unified(position: dict) -> UnifiedPosition:
         exchange="KuCoin"
     )
 
-async def fetch_and_map_kucoin_positions(symbol: str):
+async def fetch_and_map_positions(symbol: str):
     """Fetch and map KuCoin positions to UnifiedPosition."""
     try:
         response = trade_client.get_position_details(symbol=symbol)
@@ -140,15 +140,22 @@ async def fetch_and_map_kucoin_positions(symbol: str):
 
 
 async def main():
-    #balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
+    
+    balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
+    print(balance)
+    
+    orders = await fetch_open_orders()          # Fetch open orders
+    print(orders)
+    
+    tickers = await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
+    print(tickers)
+    
+    order_results = await place_limit_order()
+    print(order_results)
     
     #await fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
-    positions = await fetch_and_map_kucoin_positions(symbol="XBTUSDTM")
+    positions = await fetch_and_map_positions(symbol="XBTUSDTM")
     print(positions)
-    
-    #await fetch_open_orders()          # Fetch open orders
-    #await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
-    #await place_limit_order()
     
 if __name__ == "__main__":
     asyncio.run(main())
