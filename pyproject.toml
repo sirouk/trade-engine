@@ -29,7 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
 ]
 
-dependencies = ["aiohttp", "ujson", "pybit", "blofin"]
+dependencies = ["aiohttp", "ujson", "pybit", "blofin", "kucoin-futures-python"]
 
 
 [project.scripts]
