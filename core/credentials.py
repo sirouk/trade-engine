@@ -17,10 +17,17 @@ class BloFinCredentials:
     api_passphrase: str
 
 @dataclass
+class KuCoinCredentials:
+    api_key: str
+    api_secret: str
+    api_passphrase: str
+
+@dataclass
 class Credentials:
     bittensor_sn8: BittensorCredentials
     bybit: BybitCredentials
     blofin: BloFinCredentials
+    kucoin: KuCoinCredentials
 
 
 import ujson
@@ -35,7 +42,8 @@ def load_credentials(file_path: str) -> Credentials:
         return Credentials(
             bittensor_sn8=BittensorCredentials(api_key="", endpoint=""),
             bybit=BybitCredentials(api_key="", api_secret=""),
-            blofin=BloFinCredentials(api_key="", api_secret="", api_passphrase="")
+            blofin=BloFinCredentials(api_key="", api_secret="", api_passphrase=""),
+            kucoin=KuCoinCredentials(api_key="", api_secret="", api_passphrase=""),
         )
 
     with open(file_path, 'r') as f:
@@ -44,6 +52,7 @@ def load_credentials(file_path: str) -> Credentials:
     bybit_creds = data.get('bybit', {})
     bittensor_creds = data.get('bittensor_sn8', {})
     blofin_creds = data.get('blofin', {})
+    kucoin_creds = data.get('kucoin', {})
 
     return Credentials(
         bybit=BybitCredentials(
@@ -58,7 +67,12 @@ def load_credentials(file_path: str) -> Credentials:
             api_key=blofin_creds.get('api_key', ""),
             api_secret=blofin_creds.get('api_secret', ""),
             api_passphrase=blofin_creds.get('api_passphrase', "")
-        )
+        ),
+        kucoin=KuCoinCredentials(
+            api_key=kucoin_creds.get('api_key', ""),
+            api_secret=kucoin_creds.get('api_secret', ""),
+            api_passphrase=kucoin_creds.get('api_passphrase', "")
+        ),
     )
 
 def save_credentials(credentials: Credentials, file_path: str):
@@ -66,7 +80,8 @@ def save_credentials(credentials: Credentials, file_path: str):
     data = {
         'bybit': credentials.bybit.__dict__ if credentials.bybit else None,
         'bittensor_sn8': credentials.bittensor_sn8.__dict__ if credentials.bittensor_sn8 else None,
-        'blofin': credentials.blofin.__dict__ if credentials.blofin else None
+        'blofin': credentials.blofin.__dict__ if credentials.blofin else None,
+        'kucoin': credentials.kucoin.__dict__ if credentials.kucoin else None,
     }
     with open(file_path, 'w') as f:
         ujson.dump(data, f, indent=4)
@@ -134,6 +149,26 @@ def ensure_blofin_credentials(credentials: Credentials, skip_prompt: bool = Fals
     save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 
+def ensure_kucoin_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
+    """Prompt for KuCoin API credentials if they don't exist, or ask to change them."""
+    if credentials.kucoin.api_key and credentials.kucoin.api_secret and credentials.kucoin.api_passphrase and not prompt_for_changes("KuCoin", skip_prompt):
+        return credentials
+
+    if not credentials.kucoin.api_key or prompt_for_changes("KuCoin API key", skip_prompt):
+        api_key = input("Enter your KuCoin API key: ")
+        credentials.kucoin.api_key = api_key
+
+    if not credentials.kucoin.api_secret or prompt_for_changes("KuCoin API secret", skip_prompt):
+        api_secret = input("Enter your KuCoin API secret: ")
+        credentials.kucoin.api_secret = api_secret
+
+    if not credentials.kucoin.api_passphrase or prompt_for_changes("KuCoin API passphrase", skip_prompt):
+        passphrase = input("Enter your KuCoin API passphrase: ")
+        credentials.kucoin.api_passphrase = passphrase
+
+    save_credentials(credentials, CREDENTIALS_FILE)
+    return credentials
+
 def load_bittensor_credentials():
     """Ensure all credentials are present, and load them if necessary."""
     credentials = load_credentials(CREDENTIALS_FILE)
@@ -154,6 +189,12 @@ def load_blofin_credentials():
     assert ensure_blofin_credentials(credentials, skip_prompt=True)
     return credentials
 
+def load_kucoin_credentials():
+    """Ensure all KuCoin credentials are present, and load them if necessary."""
+    credentials = load_credentials(CREDENTIALS_FILE)
+    assert ensure_kucoin_credentials(credentials, skip_prompt=True)
+    return credentials
+
 def prompt_for_credentials(file_path: str):
     """Ensure all necessary credentials are present by prompting the user."""
     credentials = load_credentials(file_path)
@@ -162,6 +203,7 @@ def prompt_for_credentials(file_path: str):
     credentials = ensure_bybit_credentials(credentials)
     credentials = ensure_bittensor_credentials(credentials)
     credentials = ensure_blofin_credentials(credentials)
+    credentials = ensure_kucoin_credentials(credentials)
     
     # Save the updated credentials
     save_credentials(credentials, file_path)
