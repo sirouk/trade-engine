@@ -26,7 +26,6 @@ async def fetch_balance(instrument=SETTLE_COIN):
         
         # get coin balance available to trade
         balance = balance["result"]["list"][0]["coin"][0]["availableToWithdraw"]
-        
         print(f"Account Balance: {balance}")
         return balance
     except Exception as e:
@@ -40,9 +39,9 @@ async def fetch_open_positions(symbol):
     except Exception as e:
         print(f"Error fetching open positions: {str(e)}")
 
-async def fetch_open_orders():
+async def fetch_open_orders(symbol):
     try:
-        orders = bybit_client.get_open_orders(category="linear", settleCoin=SETTLE_COIN)
+        orders = bybit_client.get_open_orders(category="linear", settleCoin=SETTLE_COIN, symbol=symbol)
         print(f"Open Orders: {orders}")
         return orders
     except Exception as e:
@@ -138,28 +137,30 @@ async def fetch_and_map_positions(symbol: str):
         for unified_position in unified_positions:
             print(f"Unified Position: {unified_position}")
 
+        print(f"Unified Positions: {unified_positions}")
         return unified_positions
     except Exception as e:
         print(f"Error mapping Bybit positions: {str(e)}")
         return []
 
+
 async def main():   
     
     balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
-    print(balance)
+    #print(balance)
     
-    orders = await fetch_open_orders()          # Fetch open orders
-    print(orders)
+    orders = await fetch_open_orders(symbol="BTCUSDT")          # Fetch open orders
+    #print(orders)
     
     tickers = await fetch_tickers(symbol="BTCUSDT")  # Fetch market tickers
-    print(tickers)
+    #print(tickers)
     
     # order_results = await place_limit_order()
-    # print(order_results)
+    # #print(order_results)
     
     #await fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     positions = await fetch_and_map_positions(symbol="BTCUSDT")
-    print(positions)
+    #print(positions)
     
 if __name__ == "__main__":
     asyncio.run(main())

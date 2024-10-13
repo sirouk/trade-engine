@@ -47,10 +47,10 @@ async def fetch_open_positions(symbol):
     except Exception as e:
         print(f"Error fetching open positions: {str(e)}")
 
-async def fetch_open_orders():
+async def fetch_open_orders(symbol):
     """Fetch open futures orders."""
     try:
-        orders = trade_client.get_open_order_details(symbol="XBTUSDTM")
+        orders = trade_client.get_open_order_details(symbol=symbol)
         print(f"Open Orders: {orders}")
         return orders
     except Exception as e:
@@ -133,6 +133,7 @@ async def fetch_and_map_positions(symbol: str):
         for unified_position in unified_positions:
             print(f"Unified Position: {unified_position}")
 
+        print(f"Unified Positions: {unified_positions}")
         return unified_positions
     except Exception as e:
         print(f"Error mapping KuCoin positions: {str(e)}")
@@ -142,20 +143,20 @@ async def fetch_and_map_positions(symbol: str):
 async def main():
     
     balance = await fetch_balance(instrument="USDT")      # Fetch futures balance
-    print(balance)
+    #print(balance)
     
-    orders = await fetch_open_orders()          # Fetch open orders
-    print(orders)
+    orders = await fetch_open_orders(symbol="XBTUSDTM")          # Fetch open orders
+    #print(orders)
     
     tickers = await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
-    print(tickers)
+    #print(tickers)
     
     # order_results = await place_limit_order()
-    # print(order_results)
+    # #print(order_results)
     
     #await fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
     positions = await fetch_and_map_positions(symbol="XBTUSDTM")
-    print(positions)
+    #print(positions)
     
 if __name__ == "__main__":
     asyncio.run(main())
