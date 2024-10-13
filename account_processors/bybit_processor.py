@@ -81,18 +81,25 @@ class ByBit:
                 return float(instrument["lotSizeFilter"]["minOrderQty"]), float(instrument["lotSizeFilter"]["qtyStep"])
         raise ValueError(f"Symbol {symbol} not found.")
 
-    async def place_limit_order(self, ):
+    async def place_limit_order(self,):
         """Place a limit order on Bybit."""
         try:
+            
             # Test limit order
+            # https://bybit-exchange.github.io/docs/v5/order/create-order
+            # NOTE: make sure margin type is set to isolated
+            # NOTE: leverage must be set separately
+            # TODO: size_in_settle_coin = price * size * leverage
             category="linear"
             symbol="BTCUSDT"
             side="Buy"
-            price=60000
-            size=0.01
-            leverage=1
+            price=62957
+            size=0.001
+            leverage=3
+            isLeverage=1 # 1:leveraged 2: not leveraged
             order_type="Limit"
             time_in_force="IOC"
+            margin_mode='ISOLATED_MARGIN' # ISOLATED_MARGIN, REGULAR_MARGIN(i.e. Cross margin), PORTFOLIO_MARGIN
             reduce_only=False
             close_on_trigger=False
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -102,8 +109,31 @@ class ByBit:
             print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
 
             # Adjust size to meet minimum lot size and align with tick size
+            print(f"Size before: {size}")
             size = max(size, min_size)
-            size = round_to_tick_size(size, tick_size)
+            print(f"Size after checking min: {size}")
+            
+            print(f"Price before: {price}")
+            price = round_to_tick_size(price, tick_size)
+            print(f"Price after tick rounding: {price}")  
+            
+            # set leverage and margin mode    
+            try:
+                self.bybit_client.set_margin_mode(
+                    setMarginMode=margin_mode,
+                )   
+            except Exception as e:
+                print(f"Margin Mode unchanged: {str(e)}")
+            
+            try:     
+                self.bybit_client.set_leverage(
+                    symbol=symbol, 
+                    category=category,                
+                    buyLeverage=str(leverage), 
+                    sellLeverage=str(leverage),
+                )
+            except Exception as e:
+                print(f"Leverage unchanged: {str(e)}")
             
             order = self.bybit_client.place_order(
                 category=category,
@@ -111,7 +141,9 @@ class ByBit:
                 side=side,
                 price=price,
                 qty=size,
-                leverage=leverage,
+                # buyLeverage=leverage, # no effect
+                # sellLeverage=leverage, # no effect
+                isLeverage=isLeverage,
                 order_type=order_type,
                 time_in_force=time_in_force, # GTC, IOC, FOK, PostOnly (use IOK)
                 reduce_only=reduce_only,
@@ -120,6 +152,11 @@ class ByBit:
                 positionIdx=0, # one-way mode
             )
             print(f"Limit Order Placed: {order}")
+            # Limit Order Placed: {'retCode': 0, 'retMsg': 'OK', 'result': {'orderId': '7b844020-a052-4466-b79f-5a3e29bd5885', 'orderLinkId': '20241013221035162952'}, 'retExtInfo': {}, 'time': 1728857435429}
+            # Controlling 0.001 of BTC $62,957.00 is expected to be 62.957 USDT
+            # Actual Margin Used: 12.6185 USDT @ 5x 
+            return order
+            
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
@@ -152,8 +189,7 @@ class ByBit:
 
             for unified_position in unified_positions:
                 print(f"Unified Position: {unified_position}")
-
-            print(f"Unified Positions: {unified_positions}")
+            
             return unified_positions
         except Exception as e:
             print(f"Error mapping Bybit positions: {str(e)}")
@@ -167,18 +203,18 @@ async def main():
     
     bybit = ByBit()
     
-    balance = await bybit.fetch_balance(instrument="USDT")      # Fetch futures balance
-    print(balance)
+    # balance = await bybit.fetch_balance(instrument="USDT")      # Fetch futures balance
+    # print(balance)
     
-    tickers = await bybit.fetch_tickers(symbol="BTCUSDT")  # Fetch market tickers
-    print(tickers)
-    
-    orders = await bybit.fetch_open_orders(symbol="BTCUSDT")          # Fetch open orders
-    #print(orders)
+    # tickers = await bybit.fetch_tickers(symbol="BTCUSDT")  # Fetch market tickers
+    # print(tickers)
     
     # order_results = await bybit.place_limit_order()
-    # #print(order_results)
+    # print(order_results)
     
+    orders = await bybit.fetch_open_orders(symbol="BTCUSDT")          # Fetch open orders
+    print(orders)
+
     #await bybit.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     positions = await bybit.fetch_and_map_positions(symbol="BTCUSDT")
     #print(positions)

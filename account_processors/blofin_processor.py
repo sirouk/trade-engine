@@ -81,14 +81,17 @@ class BloFin:
         """Place a limit order on BloFin."""
         try:
             # Test limit order
+            # https://docs.blofin.com/index.html#place-order
+            # NOTE: margin mode is able to be switched here in the API
             symbol="BTC-USDT"
             side="buy"
             position_side="net" # net for one-way, long/short for hedge mode
-            price=60000
-            size=0.1
+            price=62957
+            size=0.001
             leverage=3
-            order_type="limit"
-            margin_mode="cross"
+            order_type="ioc" # market: market order, limit: limit order, post_only: Post-only order, fok: Fill-or-kill order, ioc: Immediate-or-cancel order
+            # time_in_force is implied in order_type
+            margin_mode="isolated" # isolated, cross
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
             # Fetch the correct lot size and tick size for the symbol
@@ -96,8 +99,13 @@ class BloFin:
             print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
 
             # Adjust size to be at least the minimum and align with tick size precision
+            print(f"Size before: {size}")
             size = max(size, min_size)
-            size = round_to_tick_size(size, tick_size)
+            print(f"Size after checking min: {size}")
+            
+            print(f"Price before: {price}")
+            price = round_to_tick_size(price, tick_size)
+            print(f"Price after tick rounding: {price}")  
             
             order = self.blofin_client.trading.place_order(
                 inst_id=symbol,
@@ -146,7 +154,6 @@ class BloFin:
             for unified_position in unified_positions:
                 print(f"Unified Position: {unified_position}")
 
-            print(f"Unified Positions: {unified_positions}")
             return unified_positions
         except Exception as e:
             print(f"Error mapping BloFin positions: {str(e)}")
@@ -166,11 +173,11 @@ async def main():
     tickers = await blofin.fetch_tickers(symbol="BTC-USDT")  # Fetch market tickers
     print(tickers)
     
-    orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
-    #print(orders)   
+    order_results = await blofin.place_limit_order()
+    print(order_results)
     
-    # order_results = await blofin.place_limit_order()
-    # #print(order_results)
+    orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
+    print(orders)   
     
     #await blofin.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     positions = await blofin.fetch_and_map_positions(symbol="BTC-USDT")

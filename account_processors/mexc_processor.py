@@ -80,38 +80,62 @@ class MEXC:
         except Exception as e:
             print(f"Error fetching tickers from MEXC: {str(e)}")
 
-    async def get_symbol_details(self, symbol):
-        """Fetch instrument details including tick size and lot size."""
-        instruments = self.futures_client.detail(symbol)        
-        for instrument in instruments["data"]:
-            if instrument["instId"] == symbol:
-                return float(instrument["lotSize"]), float(instrument["tickSize"])
-        raise ValueError(f"Symbol {symbol} not found.")
+    async def get_symbol_details(self, symbol: str):
+        """Fetch instrument details including lot size and tick size for MEXC Futures."""
+        try:
+            # Fetch all contract details
+            response = self.futures_client.detail()
+
+            # Check if the API call was successful
+            if not response.get("success", False):
+                raise ValueError(f"Failed to fetch contract details: {response}")
+
+            # Search for the requested symbol in the response data
+            for instrument in response.get("data", []):
+                if instrument["symbol"] == symbol:
+                    # Extract the relevant details
+                    return float(instrument.get("volUnit", 1)), float(instrument.get("priceUnit", 0.5))
+
+            # Raise an error if the symbol is not found
+            raise ValueError(f"Symbol {symbol} not found.")
+        
+        except Exception as e:
+            print(f"Error fetching symbol details: {str(e)}")
     
     async def place_limit_order(self, ):
         """Place a limit order on MEXC Futures."""
         try:
-            symbol = "BTC_USDT"
-            side = 1  # 1 for open long, 3 for open short
-            price = 60000
-            volume = 0.1
-            leverage = 3
-            order_type = 1  # Limit order
+            # Test limit order
+            # https://mexcdevelop.github.io/apidocs/contract_v1_en/#order-under-maintenance
+            symbol="BTC_USDT"
+            side=1 # 1 open long , 2 close short, 3 open short , 4 close l
+            price=60000
+            size=0.001
+            leverage=3
+            order_type=1 # Limit order
+            margin_mode=1 # 1:isolated 2:cross
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
-            # Adjust volume to meet minimum size and tick size requirements
-            min_size = 0.001  # Adapt to MEXC's requirements
-            tick_size = 0.0001
-            volume = max(volume, min_size)
-            volume = round_to_tick_size(volume, tick_size)
+            # Fetch symbol details to confirm correct size increment and tick size
+            min_size, tick_size = self.get_symbol_details(symbol)
+            print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
 
+            # Adjust size to be at least the minimum lot size and align with tick size precision
+            print(f"Size before: {size}")
+            size = max(size, min_size)
+            print(f"Size after checking min: {size}")
+            
+            print(f"Price before: {price}")
+            price = round_to_tick_size(price, tick_size)
+            print(f"Price after tick rounding: {price}")  
+            
             order = self.futures_client.order(
                 symbol=symbol,
                 price=price,
-                vol=volume,
+                vol=size,
                 side=side,
                 type=order_type,
-                open_type=1,  # 1 for isolated margin
+                open_type=margin_mode,
                 leverage=leverage,
                 external_oid=client_oid
             )
@@ -147,7 +171,6 @@ class MEXC:
             for unified_position in unified_positions:
                 print(f"Unified Position: {unified_position}")
 
-            print(f"Unified Positions: {unified_positions}")
             return unified_positions
         except Exception as e:
             print(f"Error mapping MEXC positions: {str(e)}")
@@ -167,11 +190,11 @@ async def main():
     tickers = await mexc.fetch_tickers(symbol="BTC_USDT")  # Fetch market tickers
     print(tickers)
     
-    orders = await mexc.fetch_open_orders(symbol="BTC_USDT")          # Fetch open orders
-    #print(orders)
+    order_results = await mexc.place_limit_order()
+    print(order_results)
     
-    # order_results = await mexc.place_limit_order()
-    # #print(order_results)
+    orders = await mexc.fetch_open_orders(symbol="BTC_USDT")          # Fetch open orders
+    print(orders)
     
     #await mexc.fetch_open_positions(symbol="BTC_USDT")       # Fetch open positions
     positions = await mexc.fetch_and_map_positions(symbol="BTC_USDT")

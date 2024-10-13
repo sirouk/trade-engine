@@ -81,33 +81,41 @@ class KuCoin:
 
     async def get_symbol_details(self, symbol):
         """Fetch instrument details including tick size and lot size."""
-        instruments = self.market_client.get_contract_detail(symbol)        
-        for instrument in instruments["data"]:
-            if instrument["instId"] == symbol:
-                return float(instrument["lotSize"]), float(instrument["tickSize"])
+        instrument = self.market_client.get_contract_detail(symbol)
+        if instrument["symbol"] == symbol:
+            return float(instrument["lotSize"]), float(instrument["tickSize"])
         raise ValueError(f"Symbol {symbol} not found.")
     
     async def place_limit_order(self, ):
         """Place a limit order on KuCoin Futures."""
         try:
             # Test limit order
+            # https://www.kucoin.com/docs/rest/futures-trading/orders/place-order
+            # NOTE: althought we can pass the margin mode, it must match with the user interface
             symbol="XBTUSDTM"
-            side="buy"
+            side="buy" # buy, sell
             price=60000
-            size=0.1
+            size=0.001
             leverage=3
-            order_type="limit"
+            order_type="limit" # limit or market
+            time_in_force="IOC" # GTC, GTT, IOC, FOK (IOC as FOK has unexpected behavior)
             margin_mode="ISOLATED" # ISOLATED, CROSS, default: ISOLATED
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
             # Fetch symbol details to confirm correct size increment and tick size
-            min_size, tick_size = self.get_symbol_details(symbol)
+            min_size, tick_size = await self.get_symbol_details(symbol)
             print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
 
             # Adjust size to be at least the minimum lot size and align with tick size precision
+            print(f"Size before: {size}")
             size = max(size, min_size)
-            size = round_to_tick_size(size, tick_size)
+            print(f"Size after checking min: {size}")
             
+            print(f"Price before: {price}")
+            price = round_to_tick_size(price, tick_size)
+            print(f"Price after tick rounding: {price}")  
+            
+            #create_limit_order(self, symbol, side, lever, size, price, clientOid='', **kwargs):
             order_id = self.trade_client.create_limit_order(
                 symbol=symbol,
                 side=side,
@@ -115,6 +123,7 @@ class KuCoin:
                 size=size,
                 lever=leverage,
                 orderType=order_type,
+                timeInForce=time_in_force,
                 marginMode=margin_mode,
                 clientOid=client_oid
             )
@@ -153,7 +162,6 @@ class KuCoin:
             for unified_position in unified_positions:
                 print(f"Unified Position: {unified_position}")
 
-            print(f"Unified Positions: {unified_positions}")
             return unified_positions
         except Exception as e:
             print(f"Error mapping KuCoin positions: {str(e)}")
@@ -167,21 +175,21 @@ async def main():
     
     kucoin = KuCoin()
     
-    balance = await kucoin.fetch_balance(instrument="USDT")      # Fetch futures balance
-    print(balance)
+    # balance = await kucoin.fetch_balance(instrument="USDT")      # Fetch futures balance
+    # print(balance)
 
-    tickers = await kucoin.fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
-    print(tickers)
+    # tickers = await kucoin.fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
+    # print(tickers)
     
-    orders = await kucoin.fetch_open_orders(symbol="XBTUSDTM")          # Fetch open orders
-    #print(orders)    
+    order_results = await kucoin.place_limit_order()
+    print(order_results)
     
-    # order_results = await kucoin.place_limit_order()
-    # #print(order_results)
+    # orders = await kucoin.fetch_open_orders(symbol="XBTUSDTM")          # Fetch open orders
+    # print(orders)    
     
-    #await kucoin.fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
-    positions = await kucoin.fetch_and_map_positions(symbol="XBTUSDTM")
-    #print(positions)
+    # #await kucoin.fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
+    # positions = await kucoin.fetch_and_map_positions(symbol="XBTUSDTM")
+    # #print(positions)
     
     # End time
     end_time = datetime.datetime.now()
