@@ -23,11 +23,17 @@ trade_client = Trade(
 market_client = Market()
 
 
-async def fetch_balance():
+async def fetch_balance(instrument="USDT"):
     """Fetch futures account balance."""
     try:
-        balance = user_client.get_account_overview(currency="USDT")
-        print(f"Futures Account Balance: {balance}")
+        balance = user_client.get_account_overview(currency=instrument)
+        # {'accountEquity': 0.58268157, 'unrealisedPNL': 0.0, 'marginBalance': 0.58268157, 'positionMargin': 0.0, 'orderMargin': 0.0, 'frozenFunds': 0.0, 'availableBalance': 0.58268157, 'currency': 'USDT'}
+        
+        # get coin balance available to trade
+        balance = balance.get("availableBalance", 0)
+                
+        print(f"Account Balance: {balance}")
+        return balance
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
 
@@ -94,11 +100,11 @@ async def fetch_tickers(symbol):
 
 
 async def main():
-    # await fetch_balance()      # Fetch futures balance
-    # await fetch_open_positions()       # Fetch open positions
-    # await fetch_open_orders()          # Fetch open orders
-    # await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
-    await place_limit_order()
+    await fetch_balance(instrument="USDT")      # Fetch futures balance
+    #await fetch_open_positions()       # Fetch open positions
+    #await fetch_open_orders()          # Fetch open orders
+    #await fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
+    #await place_limit_order()
     
 if __name__ == "__main__":
     asyncio.run(main())

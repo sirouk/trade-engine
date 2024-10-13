@@ -18,10 +18,16 @@ bybit_client = HTTP(
 )
 
 
-async def fetch_balance():
+async def fetch_balance(instrument=SETTLE_COIN):
     try:
-        response = bybit_client.get_wallet_balance(accountType="UNIFIED", coin=SETTLE_COIN)
-        print(f"Account Balance: {response}")
+        balance = bybit_client.get_wallet_balance(accountType="UNIFIED", coin=instrument)
+        # {'retCode': 0, 'retMsg': 'OK', 'result': {'list': [{'totalEquity': '0.10204189', 'accountIMRate': '0', 'totalMarginBalance': '0.09302213', 'totalInitialMargin': '0', 'accountType': 'UNIFIED', 'totalAvailableBalance': '0.09302213', 'accountMMRate': '0', 'totalPerpUPL': '0', 'totalWalletBalance': '0.09302213', 'accountLTV': '0', 'totalMaintenanceMargin': '0', 'coin': [{'availableToBorrow': '', 'bonus': '0', 'accruedInterest': '0', 'availableToWithdraw': '0.09304419', 'totalOrderIM': '0', 'equity': '0.09304419', 'totalPositionMM': '0', 'usdValue': '0.09302213', 'unrealisedPnl': '0', 'collateralSwitch': True, 'spotHedgingQty': '0', 'borrowAmount': '0.000000000000000000', 'totalPositionIM': '0', 'walletBalance': '0.09304419', 'cumRealisedPnl': '-10924.04925374', 'locked': '0', 'marginCollateral': True, 'coin': 'USDT'}]}]}, 'retExtInfo': {}, 'time': 1728795935267}
+        
+        # get coin balance available to trade
+        balance = balance["result"]["list"][0]["coin"][0]["availableToWithdraw"]
+        
+        print(f"Account Balance: {balance}")
+        return balance
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
 
@@ -100,11 +106,11 @@ async def place_limit_order():
         
 
 async def main():
-    # await fetch_balance()            # Fetch account balance
-    # await fetch_open_positions()     # Fetch open positions
-    # await fetch_open_orders()        # Fetch open orders
-    # await fetch_tickers(symbol="BTCUSDT")            # Fetch market tickers
-    await place_limit_order()        # Place a limit order
+    await fetch_balance(instrument="USDT")            # Fetch account balance
+    #await fetch_open_positions()     # Fetch open positions
+    #await fetch_open_orders()        # Fetch open orders
+    #await fetch_tickers(symbol="BTCUSDT")            # Fetch market tickers
+    #await place_limit_order()        # Place a limit order
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -15,11 +15,17 @@ blofin_client = BloFinClient(
 )
 
 
-async def fetch_balance():
+async def fetch_balance(instrument="USDT"):
     try:
         # Get futures balance
-        balance = blofin_client.account.get_balance(account_type="futures")
+        balance = blofin_client.account.get_balance(account_type="futures", currency=instrument)
+        # {'code': '0', 'msg': 'success', 'data': [{'currency': 'USDT', 'balance': '0.000000000000000000', 'available': '0.000000000000000000', 'frozen': '0.000000000000000000', 'bonus': '0.000000000000000000'}]}
+        
+        # get coin balance available to trade
+        balance = balance["data"][0]["available"]
+        
         print(f"Account Balance: {balance}")
+        return balance
     except Exception as e:
         print(f"Error fetching balance: {str(e)}")
 
@@ -94,11 +100,11 @@ async def fetch_tickers(symbol):
 
 
 async def main():
-    #await fetch_balance()           # Fetch account balance
+    await fetch_balance(instrument="USDT")           # Fetch account balance
     #await fetch_open_positions()    # Fetch open positions
     #await fetch_open_orders()       # Fetch open orders
     #await fetch_tickers(symbol="BTC-USDT")           # Fetch market tickers
-    await place_limit_order()       # Place a limit order
+    #await place_limit_order()       # Place a limit order
 
 if __name__ == "__main__":
     asyncio.run(main())
