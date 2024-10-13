@@ -35,7 +35,7 @@ dependencies = [
     "pybit",
     "blofin",
     "kucoin-futures-python",
-    "mexc-api-sdk @ git+https://github.com/sirouk/mexc-api-sdk-python",
+    "pymexc @ git+https://github.com/sirouk/pymexc",
 ]
 
 
