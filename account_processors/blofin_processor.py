@@ -1,12 +1,17 @@
 import asyncio
-from blofin import BloFinClient
+from blofin import BloFinClient # https://github.com/nomeida/blofin-python
 from core.credentials import load_blofin_credentials
 
 # Load BloFin API key and secret from your credentials file
 credentials = load_blofin_credentials()
 
 # Initialize the BloFin client
-blofin_client = BloFinClient(api_key=credentials.blofin.api_key, api_secret=credentials.blofin.api_secret, passphrase=credentials.blofin.api_passphrase)
+blofin_client = BloFinClient(
+    api_key=credentials.blofin.api_key,
+    api_secret=credentials.blofin.api_secret,
+    passphrase=credentials.blofin.api_passphrase
+)
+
 
 async def fetch_balance():
     try:
@@ -32,19 +37,46 @@ async def fetch_open_orders():
     except Exception as e:
         print(f"Error fetching open orders: {str(e)}")
 
-async def fetch_tickers():
+async def place_limit_order():
+    """Place a limit order on BloFin."""
+    try:
+        # Test limit order
+        symbol="BTC-USDT"
+        side='buy',
+        position_side='long',
+        price=60000,
+        size=0.01
+        margin_mode='cross',
+        order_type='limit',
+        
+        order = blofin_client.trading.place_order(
+            inst_id=symbol,
+            side=side,
+            position_side=position_side,
+            price=price,
+            size=size,
+            margin_mode=margin_mode,
+            order_type=order_type,
+        )
+        print(f"Limit Order Placed: {order}")
+    except Exception as e:
+        print(f"Error placing limit order: {str(e)}")
+
+async def fetch_tickers(symbol):
     try:
         # Get tickers for BTC-USDT
-        tickers = blofin_client.public.get_tickers(inst_id='BTC-USDT')
+        tickers = blofin_client.public.get_tickers(inst_id=symbol)
         print(f"Tickers: {tickers}")
     except Exception as e:
         print(f"Error fetching tickers: {str(e)}")
+
 
 async def main():
     await fetch_balance()           # Fetch account balance
     await fetch_open_positions()    # Fetch open positions
     await fetch_open_orders()       # Fetch open orders
-    await fetch_tickers()           # Fetch market tickers
+    await fetch_tickers(symbol="XBTUSDTM")           # Fetch market tickers
+    #await place_limit_order()       # Place a limit order
 
 if __name__ == '__main__':
     asyncio.run(main())
