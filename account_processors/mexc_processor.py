@@ -59,6 +59,42 @@ class MEXC:
         except Exception as e:
             print(f"Error fetching open orders: {str(e)}")
 
+    def map_mexc_position_to_unified(self, position: dict) -> UnifiedPosition:
+        """Convert a MEXC position response into a UnifiedPosition object."""
+        size = abs(float(position.get("vol", 0)))
+        direction = "long" if int(position.get("posSide", 1)) == 1 else "short"
+        # adjust size for short positions
+        if direction == "short":
+            size = -size
+            
+        return UnifiedPosition(
+            symbol=position["symbol"],
+            size=size,
+            average_entry_price=float(position.get("avgPrice", 0)),
+            leverage=float(position.get("leverage", 1)),
+            direction=direction,
+            unrealized_pnl=float(position.get("unrealizedPnl", 0)),
+            exchange=self.exchange_name,
+        )
+
+    async def fetch_and_map_positions(self, symbol: str):
+        """Fetch and map MEXC positions to UnifiedPosition."""
+        try:
+            response = self.futures_client.open_positions(symbol=symbol)
+            positions = response.get("data", [])
+
+            unified_positions = [
+                self.map_mexc_position_to_unified(pos) for pos in positions if float(pos.get("vol", 0)) != 0
+            ]
+
+            for unified_position in unified_positions:
+                print(f"Unified Position: {unified_position}")
+
+            return unified_positions
+        except Exception as e:
+            print(f"Error mapping MEXC positions: {str(e)}")
+            return []
+        
     async def fetch_tickers(self, symbol):
         try:
             response = self.futures_client.ticker(symbol=symbol)
@@ -133,7 +169,7 @@ class MEXC:
 
         return size_in_lots, price
     
-    async def place_limit_order(self, ):
+    async def _place_limit_order_test(self, ):
         """Place a limit order on MEXC Futures."""
         try:
             # Test limit order
@@ -202,39 +238,36 @@ class MEXC:
             return await self.open_market_position(symbol, side, size, leverage=int(position["leverage"]))
         except Exception as e:
             print(f"Error closing position: {str(e)}")
-
-    def map_mexc_position_to_unified(self, position: dict) -> UnifiedPosition:
-        """Convert a MEXC position response into a UnifiedPosition object."""
-        size = abs(float(position.get("vol", 0)))
-        direction = "long" if int(position.get("posSide", 1)) == 1 else "short"
-
-        return UnifiedPosition(
-            symbol=position["symbol"],
-            size=size,
-            average_entry_price=float(position.get("avgPrice", 0)),
-            leverage=float(position.get("leverage", 1)),
-            direction=direction,
-            unrealized_pnl=float(position.get("unrealizedPnl", 0)),
-            exchange=self.exchange_name,
-        )
-
-    async def fetch_and_map_positions(self, symbol: str):
-        """Fetch and map MEXC positions to UnifiedPosition."""
+            
+    async def reconcile_position(self, symbol: str, side: str, target_size: float, leverage: int):
+        """Reconcile the current position with the target size."""
         try:
-            response = self.futures_client.open_positions(symbol=symbol)
-            positions = response.get("data", [])
+            # Fetch the current position
+            positions = await self.fetch_open_positions(symbol)
+            current_size = float(positions[0]["vol"]) if positions else 0
 
-            unified_positions = [
-                self.map_mexc_position_to_unified(pos) for pos in positions if float(pos.get("vol", 0)) != 0
-            ]
+            # Calculate the difference
+            size_diff = target_size - current_size
 
-            for unified_position in unified_positions:
-                print(f"Unified Position: {unified_position}")
+            if size_diff == 0:
+                print(f"Position for {symbol} is already at the target size.")
+                return
 
-            return unified_positions
+            # Determine the side and place the appropriate order
+            side = 1 if size_diff > 0 else 3  # MEXC uses 1 for open long, 3 for open short
+            size_diff = abs(size_diff)
+            print(f"Adjusting position by {size_diff} lots.")
+
+            # Place market order to adjust the position
+            await self.open_market_position(
+                symbol=symbol, 
+                side=side, 
+                size=size_diff, 
+                leverage=leverage
+            )
         except Exception as e:
-            print(f"Error mapping MEXC positions: {str(e)}")
-            return []
+            print(f"Error reconciling position: {str(e)}")
+
 
 
 async def main():
@@ -250,7 +283,7 @@ async def main():
     # tickers = await mexc.fetch_tickers(symbol="BTC_USDT")  # Fetch market tickers
     # print(tickers)
     
-    # order_results = await mexc.place_limit_order()
+    # order_results = await mexc._place_limit_order_test()
     # print(order_results)
     
     open_order = await mexc.open_market_position(

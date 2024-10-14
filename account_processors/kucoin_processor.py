@@ -62,6 +62,50 @@ class KuCoin:
         except Exception as e:
             print(f"Error fetching open orders: {str(e)}")
 
+    async def fetch_and_map_positions(self, symbol: str):
+        """Fetch and map KuCoin positions to UnifiedPosition."""
+        try:
+            positions = self.trade_client.get_position_details(symbol=symbol)
+
+            # Convert each position to UnifiedPosition
+            unified_positions = [
+                self.map_kucoin_position_to_unified(pos) 
+                for pos in [positions] 
+                if float(pos.get("currentQty", 0)) != 0
+            ]
+
+            for unified_position in unified_positions:
+                print(f"Unified Position: {unified_position}")
+
+            return unified_positions
+        except Exception as e:
+            print(f"Error mapping KuCoin positions: {str(e)}")
+            return []
+            
+    def map_kucoin_position_to_unified(self, position: dict) -> UnifiedPosition:
+        """Convert a KuCoin position response into a UnifiedPosition object."""
+        size = abs(float(position.get("currentQty", 0)))  # Handle long/short positions
+        direction = "long" if float(position.get("currentQty", 0)) > 0 else "short"
+        # adjust size for short positions
+        if direction == "short":
+            size = -size
+            
+        # Use provided margin mode if available, otherwise derive from tradeMode
+        margin_mode = position.get("marginMode")
+        if margin_mode is None:
+            raise ValueError("Margin mode not found in position data.")
+            
+        return UnifiedPosition(
+            symbol=position["symbol"],
+            size=size,
+            average_entry_price=float(position.get("avgEntryPrice", 0)),
+            leverage=float(position.get("leverage", 1)),
+            direction=direction,
+            unrealized_pnl=float(position.get("unrealisedPnl", 0)),
+            margin_mode=margin_mode,
+            exchange=self.exchange_name,
+        )
+        
     async def fetch_tickers(self, symbol):
         try:
             tickers = self.market_client.get_ticker(symbol=symbol)
@@ -108,7 +152,9 @@ class KuCoin:
         print(f"Size in lots: {size_in_lots}")
 
         # Step 2: Ensure the size meets the minimum size requirement
-        size_in_lots = max(size_in_lots, min_lots)
+        sign = -1 if size_in_lots < 0 else 1  # Capture the original sign
+        size_in_lots = max(abs(size_in_lots), min_lots)  # Work with absolute value
+        size_in_lots *= sign  # Reapply the original sign
         print(f"Size after checking min: {size_in_lots}")
 
         # Step 3: Round the price to the nearest tick size
@@ -118,7 +164,7 @@ class KuCoin:
 
         return size_in_lots, price
     
-    async def place_limit_order(self, ):
+    async def _place_limit_order_test(self, ):
         """Place a limit order on KuCoin Futures."""
         try:
             # Test limit order
@@ -151,7 +197,7 @@ class KuCoin:
             #create_limit_order(self, symbol, side, lever, size, price, clientOid='', **kwargs):
             order_id = self.trade_client.create_limit_order(
                 symbol=symbol,
-                side=side,
+                side=side.lower(),
                 price=price,
                 size=lots,
                 lever=leverage,
@@ -164,31 +210,39 @@ class KuCoin:
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
-    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode="ISOLATED", is_lot_size=False):
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode="ISOLATED", scale_lot_size: bool = True, adjust_margin_mode: bool = True):
         """Open a position with a market order on KuCoin Futures."""
         try:
+            
+            print(f"HERE: Opening a {side} position for {size} lots of {symbol} with {leverage}x leverage.")
+            
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
             # If the size is already in lot size, don't scale it
-            lots = size if is_lot_size else (await self.scale_size_and_price(symbol, size, price=0))[0]
-            print(f"Opening {lots} lots of {symbol} with market order")
-
-            # Set leverage
-            try:
-                self.trade_client.set_leverage(
-                    symbol=symbol,
-                    marginMode=margin_mode,
-                )
-            except Exception as e:
-                print(f"Leverage unchanged: {str(e)}")
+            lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
+            print(f"Processing {lots} lots of {symbol} with a {side} order")
+            
+            if adjust_margin_mode:
+                print(f"Adjusting account margin mode to {margin_mode}.")
+                try:
+                    self.trade_client.modify_margin_mode(
+                        symbol=symbol,
+                        marginMode=margin_mode,
+                    )
+                except Exception as e:
+                    print(f"Margin Mode unchanged: {str(e)}")
+                    
+            print(f"Placing a market order for {lots} lots of {symbol} with {margin_mode} margin mode and {leverage}x leverage.")
+            
 
             # Place the market order
             order = self.trade_client.create_market_order(
                 symbol=symbol,
-                side=side,
+                side=side.lower(),
                 size=lots,
                 lever=leverage,
                 clientOid=client_oid,
+                marginMode=margin_mode,
             )
             print(f"Market Order Placed: {order}")
             return order
@@ -214,53 +268,88 @@ class KuCoin:
             # Place the market order to close the position
             close_order = await self.open_market_position(
                 symbol=symbol,
-                side=side,
+                side=side.lower(),
                 size=size,
                 leverage=int(position["leverage"]),
                 margin_mode=position["marginMode"],
-                is_lot_size=True  # Indicate that the size is already in lot size
+                scale_lot_size=False,
             )
             print(f"Position Closed: {close_order}")
             return close_order
 
         except Exception as e:
             print(f"Error closing position: {str(e)}")
-
-    def map_kucoin_position_to_unified(self, position: dict) -> UnifiedPosition:
-        """Convert a KuCoin position response into a UnifiedPosition object."""
-        size = abs(float(position.get("currentQty", 0)))  # Handle long/short positions
-        direction = "long" if float(position.get("currentQty", 0)) > 0 else "short"
-
-        return UnifiedPosition(
-            symbol=position["symbol"],
-            size=size,
-            average_entry_price=float(position.get("avgEntryPrice", 0)),
-            leverage=float(position.get("leverage", 1)),
-            direction=direction,
-            unrealized_pnl=float(position.get("unrealisedPnl", 0)),
-            exchange=self.exchange_name,
-        )
-
-    async def fetch_and_map_positions(self, symbol: str):
-        """Fetch and map KuCoin positions to UnifiedPosition."""
+            
+    async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
+        """
+        Reconcile the current position with the target size, leverage, and margin mode.
+        """
         try:
-            response = self.trade_client.get_position_details(symbol=symbol)
-            positions = response.get("data", [])
+            unified_positions = await self.fetch_and_map_positions(symbol)
+            current_position = unified_positions[0] if unified_positions else None
 
-            # Convert each position to UnifiedPosition
-            unified_positions = [
-                self.map_kucoin_position_to_unified(pos) 
-                for pos in positions 
-                if float(pos.get("currentQty", 0)) != 0
-            ]
+            if size != 0:
+                size, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
 
-            for unified_position in unified_positions:
-                print(f"Unified Position: {unified_position}")
+            # Initialize position state variables
+            current_size = current_position.size if current_position else 0
+            current_margin_mode = current_position.margin_mode if current_position else None
+            current_leverage = current_position.leverage if current_position else None
 
-            return unified_positions
+            # Determine if we need to close the current position before opening a new one
+            if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
+                print(f"Flipping position from {current_size} to {size}. Closing current position.")
+                await self.close_position(symbol)  # Close the current position
+                current_size = 0 # Update current size to 0 after closing the position
+
+            # Check for margin mode or leverage changes
+            if current_size != 0 and size != 0:
+                if current_margin_mode != margin_mode:
+
+                    print(f"Closing position to modify margin mode to {margin_mode}.")
+                    await self.close_position(symbol)  # Close the current position
+                    current_size = 0 # Update current size to 0 after closing the position
+
+                    print(f"Adjusting account margin mode to {margin_mode}.")
+                    try:
+                        self.trade_client.modify_margin_mode(
+                            symbol=symbol,
+                            marginMode=margin_mode,
+                        )
+                    except Exception as e:
+                        print(f"Margin Mode unchanged: {str(e)}")
+
+                # if the leverage is not within a 10% tolerance, close the position
+                if current_leverage > 0 and abs(current_leverage - leverage) > 0.10 * leverage and current_size != 0:
+                    print("KuCoin does not allow adjustment for leverage on an open position.")
+                    print(f"Closing position to modify leverage from {current_leverage} to {leverage}.")
+                    await self.close_position(symbol)  # Close the current position
+                    current_size = 0 # Update current size to 0 after closing the position
+
+            # Calculate the remaining size difference after any position closure
+            size_diff = size - current_size
+            print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
+
+            if size_diff == 0:
+                print(f"Position for {symbol} is already at the target size.")
+                return
+
+            # Determine the side of the new order (buy/sell)
+            side = "Buy" if size_diff > 0 else "Sell"
+            size_diff = abs(size_diff)  # Work with absolute size for the order
+
+            print(f"Placing a {side} order with {leverage}x leverage to adjust position by {size_diff}.")
+            await self.open_market_position(
+                symbol=symbol,
+                side=side.lower(),
+                size=size_diff,
+                leverage=leverage,
+                margin_mode=margin_mode,
+                scale_lot_size=False,
+                adjust_margin_mode=current_size == 0,
+            )
         except Exception as e:
-            print(f"Error mapping KuCoin positions: {str(e)}")
-            return []
+            print(f"Error reconciling position: {str(e)}")
 
 
 async def main():
@@ -276,24 +365,32 @@ async def main():
     # tickers = await kucoin.fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
     # print(tickers)
     
-    # order_results = await kucoin.place_limit_order()
+    # order_results = await kucoin._place_limit_order_test()
     # print(order_results)
     
-    # Open a market position
-    open_order = await kucoin.open_market_position(
-        symbol="XBTUSDTM",
-        side="sell",
-        size=0.002,
-        leverage=5,
+    # # Open a market position
+    # open_order = await kucoin.open_market_position(
+    #     symbol="XBTUSDTM",
+    #     side="sell",
+    #     size=0.002,
+    #     leverage=5,
+    # )
+    # print(open_order)
+
+    # import time
+    # time.sleep(5)  # Wait for a bit to ensure the order is processed
+
+    # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
+    await kucoin.reconcile_position(
+        symbol="XBTUSDTM",   # Symbol to adjust
+        size=-0.001,  # Desired position size (positive for long, negative for short, zero to close)
+        leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
+        margin_mode="ISOLATED"  # Desired margin mode (position must be closed to adjust)
     )
-    print(open_order)
-
-    import time
-    time.sleep(5)  # Wait for a bit to ensure the order is processed
-
-    # Close the position
-    close_order = await kucoin.close_position(symbol="XBTUSDTM")
-    print(close_order)
+    
+    # # Close the position
+    # close_order = await kucoin.close_position(symbol="XBTUSDTM")
+    # print(close_order)
     
     # orders = await kucoin.fetch_open_orders(symbol="XBTUSDTM")          # Fetch open orders
     # print(orders)    
