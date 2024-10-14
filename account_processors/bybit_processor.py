@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from pybit.unified_trading import HTTP # https://github.com/bybit-exchange/pybit/
 from core.credentials import load_bybit_credentials
-from core.utils.modifiers import round_to_tick_size
+from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 
@@ -71,15 +71,43 @@ class ByBit:
         except Exception as e:
             print(f"Error fetching tickers from Bybit: {str(e)}")
 
-    async def get_symbol_details(self, symbol):
-        """Fetch instrument details including tick size and lot size."""
+    async def get_symbol_details(self, symbol: str):
+        """Fetch instrument details including tick size, lot size, min size, and contract value."""
         instruments = self.bybit_client.get_instruments_info(category="linear", symbol=symbol)
-        # print(instruments)
-        # quit()
+
         for instrument in instruments["result"]["list"]:
             if instrument["symbol"] == symbol:
-                return float(instrument["lotSizeFilter"]["minOrderQty"]), float(instrument["lotSizeFilter"]["qtyStep"])
+                #print(f"Instrument: {instrument}")
+                lot_size = float(instrument["lotSizeFilter"]["qtyStep"])
+                min_size = float(instrument["lotSizeFilter"]["minOrderQty"])
+                tick_size = float(instrument["priceFilter"]["tickSize"])
+                contract_value = float(lot_size / min_size)  # Optional fallback
+
+                return lot_size, min_size, tick_size, contract_value
         raise ValueError(f"Symbol {symbol} not found.")
+
+    async def scale_size_and_price(self, symbol: str, size: float, price: float):
+        """Scale size and price to match exchange requirements."""
+        
+        # Fetch symbol details (e.g., contract value, lot size, tick size)
+        lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+        print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
+        
+        # Step 1: Calculate the number of lots required
+        print(f"Desired size: {size}")
+        size_in_lots = calculate_lots(size, contract_value)
+        print(f"Size in lots: {size_in_lots}")
+
+        # Step 2: Ensure the size meets the minimum size requirement
+        size_in_lots = max(size_in_lots, min_lots)
+        print(f"Size after checking min: {size_in_lots}")
+
+        # Step 3: Round the price to the nearest tick size
+        print(f"Price before: {price}")
+        price = round_to_tick_size(price, tick_size)
+        print(f"Price after tick rounding: {price}")
+
+        return size_in_lots, price
 
     async def place_limit_order(self,):
         """Place a limit order on Bybit."""
@@ -93,8 +121,8 @@ class ByBit:
             category="linear"
             symbol="BTCUSDT"
             side="Buy"
-            price=62957
-            size=0.001
+            price=62699
+            size=0.003 # in quantity of symbol
             leverage=3
             isLeverage=1 # 1:leveraged 2: not leveraged
             order_type="Limit"
@@ -104,18 +132,10 @@ class ByBit:
             close_on_trigger=False
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
-            # Get correct lot size and tick size for the symbol
-            min_size, tick_size = await self.get_symbol_details(symbol)
-            print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
-
-            # Adjust size to meet minimum lot size and align with tick size
-            print(f"Size before: {size}")
-            size = max(size, min_size)
-            print(f"Size after checking min: {size}")
-            
-            print(f"Price before: {price}")
-            price = round_to_tick_size(price, tick_size)
-            print(f"Price after tick rounding: {price}")  
+            # Fetch and scale the size and price
+            lots, price = await self.scale_size_and_price(symbol, size, price)
+            print(f"Ordering {lots} lots @ {price}")
+            #quit()
             
             # set leverage and margin mode    
             try:
@@ -140,9 +160,7 @@ class ByBit:
                 symbol=symbol,
                 side=side,
                 price=price,
-                qty=size,
-                # buyLeverage=leverage, # no effect
-                # sellLeverage=leverage, # no effect
+                qty=lots,
                 isLeverage=isLeverage,
                 order_type=order_type,
                 time_in_force=time_in_force, # GTC, IOC, FOK, PostOnly (use IOK)
@@ -152,7 +170,7 @@ class ByBit:
                 positionIdx=0, # one-way mode
             )
             print(f"Limit Order Placed: {order}")
-            # Limit Order Placed: {'retCode': 0, 'retMsg': 'OK', 'result': {'orderId': '7b844020-a052-4466-b79f-5a3e29bd5885', 'orderLinkId': '20241013221035162952'}, 'retExtInfo': {}, 'time': 1728857435429}
+            # Limit Order Placed: {'retCode': 0, 'retMsg': 'OK', 'result': {'orderId': '2c9eee09-b90e-47eb-ace0-d82c6cdc7bfa', 'orderLinkId': '20241014022046505544'}, 'retExtInfo': {}, 'time': 1728872447805}
             # Controlling 0.001 of BTC $62,957.00 is expected to be 62.957 USDT
             # Actual Margin Used: 12.6185 USDT @ 5x 
             return order
@@ -209,14 +227,14 @@ async def main():
     # tickers = await bybit.fetch_tickers(symbol="BTCUSDT")  # Fetch market tickers
     # print(tickers)
     
-    # order_results = await bybit.place_limit_order()
-    # print(order_results)
+    order_results = await bybit.place_limit_order()
+    print(order_results)
     
-    orders = await bybit.fetch_open_orders(symbol="BTCUSDT")          # Fetch open orders
-    print(orders)
+    # orders = await bybit.fetch_open_orders(symbol="BTCUSDT")          # Fetch open orders
+    # print(orders)
 
     #await bybit.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
-    positions = await bybit.fetch_and_map_positions(symbol="BTCUSDT")
+    #positions = await bybit.fetch_and_map_positions(symbol="BTCUSDT")
     #print(positions)
     
     # End time

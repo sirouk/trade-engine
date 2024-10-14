@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from blofin import BloFinClient # https://github.com/nomeida/blofin-python
 from core.credentials import load_blofin_credentials
-from core.utils.modifiers import round_to_tick_size
+from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 
@@ -74,8 +74,37 @@ class BloFin:
         instruments = self.blofin_client.public.get_instruments(inst_type="SWAP")
         for instrument in instruments["data"]:
             if instrument["instId"] == symbol:
-                return float(instrument["lotSize"]), float(instrument["tickSize"])
+                #print(f"Symbol: {symbol} -> {instrument}")
+                lot_size = float(instrument["lotSize"])
+                min_size = float(instrument["minSize"])
+                tick_size = float(instrument["tickSize"])
+                contract_value = float(instrument["contractValue"])
+                
+                return lot_size, min_size, tick_size, contract_value
         raise ValueError(f"Symbol {symbol} not found.")
+
+    async def scale_size_and_price(self, symbol: str, size: float, price: float):
+        """Scale size and price to match exchange requirements."""
+        
+        # Fetch symbol details (e.g., contract value, lot size, tick size)
+        lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+        print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
+        
+        # Step 1: Calculate the number of lots required
+        print(f"Desired size: {size}")
+        size_in_lots = calculate_lots(size, contract_value)
+        print(f"Size in lots: {size_in_lots}")
+
+        # Step 2: Ensure the size meets the minimum size requirement
+        size_in_lots = max(size_in_lots, min_lots)
+        print(f"Size after checking min: {size_in_lots}")
+
+        # Step 3: Round the price to the nearest tick size
+        print(f"Price before: {price}")
+        price = round_to_tick_size(price, tick_size)
+        print(f"Price after tick rounding: {price}")
+
+        return size_in_lots, price
 
     async def place_limit_order(self, ):
         """Place a limit order on BloFin."""
@@ -86,39 +115,32 @@ class BloFin:
             symbol="BTC-USDT"
             side="buy"
             position_side="net" # net for one-way, long/short for hedge mode
-            price=62957
-            size=0.001
+            price=62850
+            size=0.003 # in quantity of symbol
             leverage=3
             order_type="ioc" # market: market order, limit: limit order, post_only: Post-only order, fok: Fill-or-kill order, ioc: Immediate-or-cancel order
             # time_in_force is implied in order_type
             margin_mode="isolated" # isolated, cross
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
-            # Fetch the correct lot size and tick size for the symbol
-            min_size, tick_size = await self.get_symbol_details(symbol)
-            print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
-
-            # Adjust size to be at least the minimum and align with tick size precision
-            print(f"Size before: {size}")
-            size = max(size, min_size)
-            print(f"Size after checking min: {size}")
-            
-            print(f"Price before: {price}")
-            price = round_to_tick_size(price, tick_size)
-            print(f"Price after tick rounding: {price}")  
+            # Fetch and scale the size and price
+            lots, price = await self.scale_size_and_price(symbol, size, price)
+            print(f"Ordering {lots} lots @ {price}")
+            #quit()
             
             order = self.blofin_client.trading.place_order(
                 inst_id=symbol,
                 side=side,
                 position_side=position_side,
                 price=price,
-                size=size,
+                size=lots,
                 leverage=leverage,
                 order_type=order_type,
                 margin_mode=margin_mode,
                 clientOrderId=client_order_id,
             )
             print(f"Limit Order Placed: {order}")
+            # Limit Order Placed: {'code': '0', 'msg': '', 'data': [{'orderId': '1000012973229', 'clientOrderId': '20241014022135830998', 'msg': 'success', 'code': '0'}]}
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
@@ -167,21 +189,21 @@ async def main():
     
     blofin = BloFin()
     
-    balance = await blofin.fetch_balance(instrument="USDT")      # Fetch futures balance
-    print(balance)
+    # balance = await blofin.fetch_balance(instrument="USDT")      # Fetch futures balance
+    # print(balance)
 
-    tickers = await blofin.fetch_tickers(symbol="BTC-USDT")  # Fetch market tickers
-    print(tickers)
+    # tickers = await blofin.fetch_tickers(symbol="BTC-USDT")  # Fetch market tickers
+    # print(tickers)
     
     order_results = await blofin.place_limit_order()
     print(order_results)
     
-    orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
-    print(orders)   
+    # orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
+    # print(orders)   
     
-    #await blofin.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
-    positions = await blofin.fetch_and_map_positions(symbol="BTC-USDT")
-    #print(positions)
+    # #await blofin.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
+    # positions = await blofin.fetch_and_map_positions(symbol="BTC-USDT")
+    # #print(positions)
     
     # End time
     end_time = datetime.datetime.now()

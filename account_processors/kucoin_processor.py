@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from kucoin_futures.client import UserData, Trade, Market # https://github.com/Kucoin/kucoin-futures-python-sdk
 from core.credentials import load_kucoin_credentials
-from core.utils.modifiers import round_to_tick_size
+from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 
@@ -79,12 +79,44 @@ class KuCoin:
         except Exception as e:
             print(f"Error fetching tickers from KuCoin: {str(e)}")
 
-    async def get_symbol_details(self, symbol):
-        """Fetch instrument details including tick size and lot size."""
+    async def get_symbol_details(self, symbol: str):
+        """Fetch instrument details including tick size, lot size, and contract value."""
+        # Fetch the instrument details from the market client
         instrument = self.market_client.get_contract_detail(symbol)
+
+        # Check if the response contains the desired symbol
         if instrument["symbol"] == symbol:
-            return float(instrument["lotSize"]), float(instrument["tickSize"])
+            #print(f"Instrument: {instrument}")
+            lot_size = float(instrument["multiplier"])  # Lot size (e.g., 1)
+            min_lots = float(instrument["lotSize"])  # Minimum order size in lots
+            tick_size = float(instrument["tickSize"])  # Tick size for price (e.g., 0.1)
+            contract_value = float(instrument["multiplier"])  # Contract value (e.g., 0.001 BTC per lot)
+
+            return lot_size, min_lots, tick_size, contract_value
         raise ValueError(f"Symbol {symbol} not found.")
+    
+    async def scale_size_and_price(self, symbol: str, size: float, price: float):
+        """Scale size and price to match exchange requirements."""
+        
+        # Fetch symbol details (e.g., contract value, lot size, tick size)
+        lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+        print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
+        
+        # Step 1: Calculate the number of lots required
+        print(f"Desired size: {size}")
+        size_in_lots = calculate_lots(size, contract_value)
+        print(f"Size in lots: {size_in_lots}")
+
+        # Step 2: Ensure the size meets the minimum size requirement
+        size_in_lots = max(size_in_lots, min_lots)
+        print(f"Size after checking min: {size_in_lots}")
+
+        # Step 3: Round the price to the nearest tick size
+        print(f"Price before: {price}")
+        price = round_to_tick_size(price, tick_size)
+        print(f"Price after tick rounding: {price}")
+
+        return size_in_lots, price
     
     async def place_limit_order(self, ):
         """Place a limit order on KuCoin Futures."""
@@ -94,33 +126,34 @@ class KuCoin:
             # NOTE: althought we can pass the margin mode, it must match with the user interface
             symbol="XBTUSDTM"
             side="buy" # buy, sell
-            price=60000
-            size=0.001
+            price=62957
+            size=0.003 # in quantity of symbol
             leverage=3
             order_type="limit" # limit or market
             time_in_force="IOC" # GTC, GTT, IOC, FOK (IOC as FOK has unexpected behavior)
             margin_mode="ISOLATED" # ISOLATED, CROSS, default: ISOLATED
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
-            # Fetch symbol details to confirm correct size increment and tick size
-            min_size, tick_size = await self.get_symbol_details(symbol)
-            print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
-
-            # Adjust size to be at least the minimum lot size and align with tick size precision
-            print(f"Size before: {size}")
-            size = max(size, min_size)
-            print(f"Size after checking min: {size}")
+            # Fetch and scale the size and price
+            lots, price = await self.scale_size_and_price(symbol, size, price)
+            print(f"Ordering {lots} lots @ {price}")
+            #quit()
             
-            print(f"Price before: {price}")
-            price = round_to_tick_size(price, tick_size)
-            print(f"Price after tick rounding: {price}")  
+            # set leverage and margin mode    
+            try:
+                self.trade_client.modify_margin_mode(
+                    symbol=symbol,
+                    marginMode=margin_mode,
+                )
+            except Exception as e:
+                print(f"Margin Mode unchanged: {str(e)}")
             
             #create_limit_order(self, symbol, side, lever, size, price, clientOid='', **kwargs):
             order_id = self.trade_client.create_limit_order(
                 symbol=symbol,
                 side=side,
                 price=price,
-                size=size,
+                size=lots,
                 lever=leverage,
                 orderType=order_type,
                 timeInForce=time_in_force,
