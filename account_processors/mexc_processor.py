@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from pymexc import futures
 from core.credentials import load_mexc_credentials
-from core.utils.modifiers import round_to_tick_size
+from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 
@@ -81,26 +81,57 @@ class MEXC:
             print(f"Error fetching tickers from MEXC: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
-        """Fetch instrument details including lot size and tick size for MEXC Futures."""
+        """Fetch instrument details including lot size, min size, tick size, and contract value."""
         try:
-            # Fetch all contract details
-            response = self.futures_client.detail()
+            # Fetch all contract details for the given symbol
+            response = self.futures_client.detail(symbol=symbol)
 
             # Check if the API call was successful
             if not response.get("success", False):
                 raise ValueError(f"Failed to fetch contract details: {response}")
 
-            # Search for the requested symbol in the response data
-            for instrument in response.get("data", []):
-                if instrument["symbol"] == symbol:
-                    # Extract the relevant details
-                    return float(instrument.get("volUnit", 1)), float(instrument.get("priceUnit", 0.5))
+            # Extract the instrument data
+            instrument = response["data"]
+            if instrument["symbol"] != symbol:
+                raise ValueError(f"Symbol {symbol} not found.")
 
-            # Raise an error if the symbol is not found
-            raise ValueError(f"Symbol {symbol} not found.")
-        
+            #print(f"Instrument: {instrument}")
+            lot_size = float(instrument["contractSize"])    # Lot size (e.g., 0.0001 BTC per lot)
+            min_lots = float(instrument["minVol"])           # Minimum trade size in lots (e.g., 1)
+            tick_size = float(instrument["priceUnit"])       # Minimum price change (e.g., 0.1 USDT)
+            contract_value = float(instrument["contractSize"])  # Value per contract
+
+            return lot_size, min_lots, tick_size, contract_value
+
+        except KeyError as e:
+            raise ValueError(f"Missing expected key: {e}") from e
+
         except Exception as e:
             print(f"Error fetching symbol details: {str(e)}")
+            return None
+            
+    async def scale_size_and_price(self, symbol: str, size: float, price: float):
+        """Scale size and price to match exchange requirements."""
+        
+        # Fetch symbol details (e.g., contract value, lot size, tick size)
+        lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+        print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
+        
+        # Step 1: Calculate the number of lots required
+        print(f"Desired size: {size}")
+        size_in_lots = calculate_lots(size, contract_value)
+        print(f"Size in lots: {size_in_lots}")
+
+        # Step 2: Ensure the size meets the minimum size requirement
+        size_in_lots = max(size_in_lots, min_lots)
+        print(f"Size after checking min: {size_in_lots}")
+
+        # Step 3: Round the price to the nearest tick size
+        print(f"Price before: {price}")
+        price = round_to_tick_size(price, tick_size)
+        print(f"Price after tick rounding: {price}")
+
+        return size_in_lots, price
     
     async def place_limit_order(self, ):
         """Place a limit order on MEXC Futures."""
@@ -109,30 +140,22 @@ class MEXC:
             # https://mexcdevelop.github.io/apidocs/contract_v1_en/#order-under-maintenance
             symbol="BTC_USDT"
             side=1 # 1 open long , 2 close short, 3 open short , 4 close l
-            price=60000
-            size=0.001
+            price=62530
+            size=0.001 # in quantity of symbol
             leverage=3
             order_type=1 # Limit order
             margin_mode=1 # 1:isolated 2:cross
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
-            # Fetch symbol details to confirm correct size increment and tick size
-            min_size, tick_size = self.get_symbol_details(symbol)
-            print(f"Symbol {symbol} -> Lot Size: {min_size}, Tick Size: {tick_size}")
-
-            # Adjust size to be at least the minimum lot size and align with tick size precision
-            print(f"Size before: {size}")
-            size = max(size, min_size)
-            print(f"Size after checking min: {size}")
-            
-            print(f"Price before: {price}")
-            price = round_to_tick_size(price, tick_size)
-            print(f"Price after tick rounding: {price}")  
+            # Fetch and scale the size and price
+            lots, price = await self.scale_size_and_price(symbol, size, price)
+            print(f"Ordering {lots} lots @ {price}")
+            #quit()
             
             order = self.futures_client.order(
                 symbol=symbol,
                 price=price,
-                vol=size,
+                vol=lots,
                 side=side,
                 type=order_type,
                 open_type=margin_mode,
@@ -184,26 +207,25 @@ async def main():
     
     mexc = MEXC()
     
-    balance = await mexc.fetch_balance(instrument="USDT")      # Fetch futures balance
-    print(balance)
+    # balance = await mexc.fetch_balance(instrument="USDT")      # Fetch futures balance
+    # print(balance)
     
-    tickers = await mexc.fetch_tickers(symbol="BTC_USDT")  # Fetch market tickers
-    print(tickers)
+    # tickers = await mexc.fetch_tickers(symbol="BTC_USDT")  # Fetch market tickers
+    # print(tickers)
     
     order_results = await mexc.place_limit_order()
     print(order_results)
     
-    orders = await mexc.fetch_open_orders(symbol="BTC_USDT")          # Fetch open orders
-    print(orders)
+    # orders = await mexc.fetch_open_orders(symbol="BTC_USDT")          # Fetch open orders
+    # print(orders)
     
-    #await mexc.fetch_open_positions(symbol="BTC_USDT")       # Fetch open positions
-    positions = await mexc.fetch_and_map_positions(symbol="BTC_USDT")
-    #print(positions)
+    # #await mexc.fetch_open_positions(symbol="BTC_USDT")       # Fetch open positions
+    # positions = await mexc.fetch_and_map_positions(symbol="BTC_USDT")
+    # #print(positions)
     
     # End time
     end_time = datetime.datetime.now()
     print(f"Time taken: {end_time - start_time}")
-
 
 if __name__ == "__main__":
     asyncio.run(main())
