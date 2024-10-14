@@ -59,24 +59,6 @@ class MEXC:
         except Exception as e:
             print(f"Error fetching open orders: {str(e)}")
 
-    def map_mexc_position_to_unified(self, position: dict) -> UnifiedPosition:
-        """Convert a MEXC position response into a UnifiedPosition object."""
-        size = abs(float(position.get("vol", 0)))
-        direction = "long" if int(position.get("posSide", 1)) == 1 else "short"
-        # adjust size for short positions
-        if direction == "short":
-            size = -size
-            
-        return UnifiedPosition(
-            symbol=position["symbol"],
-            size=size,
-            average_entry_price=float(position.get("avgPrice", 0)),
-            leverage=float(position.get("leverage", 1)),
-            direction=direction,
-            unrealized_pnl=float(position.get("unrealizedPnl", 0)),
-            exchange=self.exchange_name,
-        )
-
     async def fetch_and_map_positions(self, symbol: str):
         """Fetch and map MEXC positions to UnifiedPosition."""
         try:
@@ -84,7 +66,9 @@ class MEXC:
             positions = response.get("data", [])
 
             unified_positions = [
-                self.map_mexc_position_to_unified(pos) for pos in positions if float(pos.get("vol", 0)) != 0
+                self.map_mexc_position_to_unified(pos) 
+                for pos in positions 
+                if float(pos.get("vol", 0)) != 0
             ]
 
             for unified_position in unified_positions:
@@ -94,6 +78,30 @@ class MEXC:
         except Exception as e:
             print(f"Error mapping MEXC positions: {str(e)}")
             return []
+
+    def map_mexc_position_to_unified(self, position: dict) -> UnifiedPosition:
+        """Convert a MEXC position response into a UnifiedPosition object."""
+        size = abs(float(position.get("vol", 0)))
+        direction = "long" if int(position.get("posSide", 1)) == 1 else "short"
+        # adjust size for short positions
+        if direction == "short":
+            size = -size
+            
+        # Use provided margin mode if available, otherwise derive from tradeMode
+        margin_mode = position.get("open_type")
+        if margin_mode is None:
+            raise ValueError("Margin mode not found in position data.")
+        
+        return UnifiedPosition(
+            symbol=position["symbol"],
+            size=size,
+            average_entry_price=float(position.get("avgPrice", 0)),
+            leverage=float(position.get("leverage", 1)),
+            direction=direction,
+            unrealized_pnl=float(position.get("unrealizedPnl", 0)),
+            margin_mode=margin_mode,
+            exchange=self.exchange_name,
+        )
         
     async def fetch_tickers(self, symbol):
         try:
@@ -159,7 +167,9 @@ class MEXC:
         print(f"Size in lots: {size_in_lots}")
 
         # Step 2: Ensure the size meets the minimum size requirement
-        size_in_lots = max(size_in_lots, min_lots)
+        sign = -1 if size_in_lots < 0 else 1  # Capture the original sign
+        size_in_lots = max(abs(size_in_lots), min_lots)  # Work with absolute value
+        size_in_lots *= sign  # Reapply the original sign
         print(f"Size after checking min: {size_in_lots}")
 
         # Step 3: Round the price to the nearest tick size
@@ -202,18 +212,22 @@ class MEXC:
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
         
-    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int):
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
         """Open a market position."""
         try:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            lots, _ = await self.scale_size_and_price(symbol, size, price=0)
-            print(f"Opening {lots} lots of {symbol} with market order")
-
+            
+            # If the size is already in lot size, don't scale it
+            lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
+            print(f"Processing {lots} lots of {symbol} with a {side} order")
+            
             order = self.futures_client.order(
                 symbol=symbol,
                 vol=lots,
                 side=side,
+                price=0,  # Market order
                 type=2,  # Market order
+                open_type=margin_mode,
                 leverage=leverage,
                 external_oid=client_oid
             )
@@ -239,35 +253,75 @@ class MEXC:
         except Exception as e:
             print(f"Error closing position: {str(e)}")
             
-    async def reconcile_position(self, symbol: str, side: str, target_size: float, leverage: int):
-        """Reconcile the current position with the target size."""
+    async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
+        """
+        Reconcile the current position with the target size, leverage, and margin mode.
+        """
         try:
-            # Fetch the current position
-            positions = await self.fetch_open_positions(symbol)
-            current_size = float(positions[0]["vol"]) if positions else 0
+            unified_positions = await self.fetch_and_map_positions(symbol)
+            current_position = unified_positions[0] if unified_positions else None
 
-            # Calculate the difference
-            size_diff = target_size - current_size
+            if size != 0:
+                size, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
+
+            # Initialize position state variables
+            current_size = current_position.size if current_position else 0
+            current_margin_mode = current_position.margin_mode if current_position else None
+            current_leverage = current_position.leverage if current_position else None
+
+            # Determine if we need to close the current position before opening a new one
+            if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
+                print(f"Flipping position from {current_size} to {size}. Closing current position.")
+                await self.close_position(symbol)  # Close the current position
+                current_size = 0 # Update current size to 0 after closing the position
+
+            # Check for margin mode or leverage changes
+            if current_size != 0 and size != 0:
+                if current_margin_mode != margin_mode:
+
+                    print(f"Closing position to modify margin mode to {margin_mode}.")
+                    await self.close_position(symbol)  # Close the current position
+                    current_size = 0 # Update current size to 0 after closing the position
+
+                    print(f"Adjusting account margin mode to {margin_mode}.")
+                    try:
+                        self.trade_client.modify_margin_mode(
+                            symbol=symbol,
+                            marginMode=margin_mode,
+                        )
+                    except Exception as e:
+                        print(f"Margin Mode unchanged: {str(e)}")
+
+                # if the leverage is not within a 10% tolerance, close the position
+                if current_leverage > 0 and abs(current_leverage - leverage) > 0.10 * leverage and current_size != 0:
+                    print("KuCoin does not allow adjustment for leverage on an open position.")
+                    print(f"Closing position to modify leverage from {current_leverage} to {leverage}.")
+                    await self.close_position(symbol)  # Close the current position
+                    current_size = 0 # Update current size to 0 after closing the position
+
+            # Calculate the remaining size difference after any position closure
+            size_diff = size - current_size
+            print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 
             if size_diff == 0:
                 print(f"Position for {symbol} is already at the target size.")
                 return
 
-            # Determine the side and place the appropriate order
-            side = 1 if size_diff > 0 else 3  # MEXC uses 1 for open long, 3 for open short
-            size_diff = abs(size_diff)
-            print(f"Adjusting position by {size_diff} lots.")
+            # Determine the side of the new order (buy/sell)
+            side = 1 if size_diff > 0 else 3
+            size_diff = abs(size_diff)  # Work with absolute size for the order
 
-            # Place market order to adjust the position
+            print(f"Placing a {side} order with {leverage}x leverage to adjust position by {size_diff}.")
             await self.open_market_position(
-                symbol=symbol, 
-                side=side, 
-                size=size_diff, 
-                leverage=leverage
+                symbol=symbol,
+                side=side,
+                size=size_diff,
+                leverage=leverage,
+                margin_mode=margin_mode,
+                scale_lot_size=False
             )
         except Exception as e:
             print(f"Error reconciling position: {str(e)}")
-
 
 
 async def main():
@@ -286,20 +340,28 @@ async def main():
     # order_results = await mexc._place_limit_order_test()
     # print(order_results)
     
-    open_order = await mexc.open_market_position(
-        symbol="BTC_USDT",
-        side="sell",
-        size=0.002,
-        leverage=5,
-    )
-    print(open_order)
+    # open_order = await mexc.open_market_position(
+    #     symbol="BTC_USDT",
+    #     side=1, # 1 open long , 2 close short, 3 open short , 4 close l
+    #     size=0.002,
+    #     leverage=5,
+    # )
+    # print(open_order)
 
-    import time
-    time.sleep(5)  # Wait for a bit to ensure the order is processed
+    # import time
+    # time.sleep(5)  # Wait for a bit to ensure the order is processed
+    
+    # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
+    await mexc.reconcile_position(
+        symbol="BTC_USDT",   # Symbol to adjust
+        size=-0.001,  # Desired position size (positive for long, negative for short, zero to close)
+        leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
+        margin_mode=1  # 1:isolated 2:cross
+    )    
 
     # Close the position
-    close_order = await mexc.close_position(symbol="BTC_USDT")
-    print(close_order)
+    # close_order = await mexc.close_position(symbol="BTC_USDT")
+    # print(close_order)
     
     # orders = await mexc.fetch_open_orders(symbol="BTC_USDT")          # Fetch open orders
     # print(orders)
