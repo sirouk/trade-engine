@@ -200,10 +200,7 @@ class BloFin:
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
             # Fetch and scale the size
-            if scale_lot_size:
-                lots, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
-            else:
-                lots = size
+            lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
             print(f"Processing {lots} lots of {symbol} with market order")
 
             # Place the market order

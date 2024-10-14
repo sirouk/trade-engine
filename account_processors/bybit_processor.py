@@ -243,11 +243,7 @@ class ByBit:
         """Open a position with a market order."""
         try:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            if scale_lot_size:
-                lots, _ = await self.scale_size_and_price(symbol, size, price=0)
-            else:
-                lots = size
-
+            lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
             print(f"Processing {lots} lots of {symbol} with a {side} order.")
 
             if adjust_margin_mode:
