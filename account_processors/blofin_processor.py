@@ -296,7 +296,7 @@ class BloFin:
                 except Exception as e:
                     print(f"Failed to adjust margin mode: {str(e)}")
 
-                print(f"Adjusting leverage to {leverage} for {symbol}.")
+                print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
                 try:
                     self.blofin_client.trading.set_leverage(
                         inst_id=symbol,
@@ -358,9 +358,6 @@ async def main():
     
     # import time
     # time.sleep(5)
-        
-    # close_result = await blofin.close_position(symbol="BTC-USDT")
-    # print(close_result)
 
     # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
     await blofin.reconcile_position(
@@ -369,6 +366,9 @@ async def main():
         leverage=3,         # Desired leverage
         margin_mode="isolated"  # Desired margin mode
     )
+        
+    # close_result = await blofin.close_position(symbol="BTC-USDT")
+    # print(close_result)
     
     # orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
     # print(orders)   

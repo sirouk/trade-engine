@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 @dataclass
 class UnifiedPosition:
@@ -7,10 +6,11 @@ class UnifiedPosition:
     size: float  # Size of the open position
     average_entry_price: float  # Average price of the position
     direction: str  # Either 'long' or 'short'
-    leverage: Optional[float] = None  # Leverage, if applicable
-    unrealized_pnl: Optional[float] = None  # Unrealized PnL (optional)
-    exchange: Optional[str] = None  # Exchange (optional)
-
+    leverage: float  # Leverage, if applicable
+    unrealized_pnl: float # Unrealized PnL (optional)
+    margin_mode: str  # ISOLATED_MARGIN or CROSS_MARGIN
+    exchange: str # Exchange (optional)            
+            
     def is_profitable(self, current_price: float) -> bool:
         if self.direction == "long":
             return current_price > self.average_entry_price
