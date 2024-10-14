@@ -52,6 +52,54 @@ class BloFin:
         except Exception as e:
             print(f"Error fetching open orders: {str(e)}")
 
+    async def fetch_and_map_positions(self, symbol: str):
+        """Fetch open positions from BloFin and convert them to UnifiedPosition objects."""
+        try:
+            # Fetch positions filtered by symbol directly
+            response = self.blofin_client.trading.get_positions(inst_id=symbol)
+            positions = response.get("data", [])
+            #print(positions)
+            #quit()
+
+            # Convert to UnifiedPosition objects
+            unified_positions = [
+                self.map_blofin_position_to_unified(pos) 
+                for pos in positions 
+                if float(pos.get("positions", 0)) != 0
+            ]
+
+            for unified_position in unified_positions:
+                print(f"Unified Position: {unified_position}")
+
+            return unified_positions
+        except Exception as e:
+            print(f"Error mapping BloFin positions: {str(e)}")
+            return []
+
+    def map_blofin_position_to_unified(self, position: dict) -> UnifiedPosition:
+        """Convert a BloFin position response into a UnifiedPosition object."""
+        size = abs(float(position.get("positions", 0)))  # Handle both long and short positions
+        direction = "long" if float(position.get("positions", 0)) > 0 else "short"
+        # adjust size for short positions
+        if direction == "short":
+            size = -size
+            
+        # Use provided margin mode if available, otherwise derive from tradeMode
+        margin_mode = position.get("marginMode")
+        if margin_mode is None:
+            raise ValueError("Margin mode not found in position data.")
+            
+        return UnifiedPosition(
+            symbol=position["instId"],
+            size=size,
+            average_entry_price=float(position.get("averagePrice", 0)),
+            leverage=float(position.get("leverage", 1)),
+            direction=direction,
+            unrealized_pnl=float(position.get("unrealizedPnl", 0)),
+            margin_mode=margin_mode,
+            exchange=self.exchange_name,
+        )
+        
     async def fetch_tickers(self, symbol):
         try:
             tickers = self.blofin_client.public.get_tickers(inst_id=symbol)
@@ -96,7 +144,9 @@ class BloFin:
         print(f"Size in lots: {size_in_lots}")
 
         # Step 2: Ensure the size meets the minimum size requirement
-        size_in_lots = max(size_in_lots, min_lots)
+        sign = -1 if size_in_lots < 0 else 1  # Capture the original sign
+        size_in_lots = max(abs(size_in_lots), min_lots)  # Work with absolute value
+        size_in_lots *= sign  # Reapply the original sign
         print(f"Size after checking min: {size_in_lots}")
 
         # Step 3: Round the price to the nearest tick size
@@ -106,7 +156,7 @@ class BloFin:
 
         return size_in_lots, price
 
-    async def place_limit_order(self, ):
+    async def _place_limit_order_test(self, ):
         """Place a limit order on BloFin."""
         try:
             # Test limit order
@@ -130,7 +180,7 @@ class BloFin:
             
             order = self.blofin_client.trading.place_order(
                 inst_id=symbol,
-                side=side,
+                side=side.lower(),
                 position_side=position_side,
                 price=price,
                 size=lots,
@@ -144,21 +194,23 @@ class BloFin:
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
-    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode="isolated"):
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
         """Open a position with a market order on BloFin."""
         try:
-            position_side = "net"  # Adjust based on your account mode (e.g., 'net', 'long', 'short')
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
             # Fetch and scale the size
-            lots, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
+            if scale_lot_size:
+                lots, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
+            else:
+                lots = size
             print(f"Opening {lots} lots of {symbol} with market order")
 
             # Place the market order
             order = self.blofin_client.trading.place_order(
                 inst_id=symbol,
-                side=side,
-                position_side=position_side,
+                side=side.lower(),
+                position_side="net", # Adjust based on your account mode (e.g., 'net', 'long', 'short')
                 price=0, # not needed for market order
                 size=lots,
                 leverage=leverage,
@@ -188,7 +240,7 @@ class BloFin:
             size = float(position["positions"])  # Use the 'positions' value directly
 
             # Determine the side based on the position size
-            side = "sell" if size > 0 else "buy"  # Long -> Sell, Short -> Buy
+            side = "Sell" if size > 0 else "Buy"  # Long -> Sell, Short -> Buy
             size = abs(size)  # Negate size by using its absolute value
             print(f"Closing {size} lots of {symbol} with a market order.")
 
@@ -196,14 +248,15 @@ class BloFin:
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             order = self.blofin_client.trading.place_order(
                 inst_id=symbol,
-                side=side,
+                side=side.lower(),
                 position_side=position["positionSide"],  # Ensure the same position mode
                 price=0,
                 size=size,
                 leverage=int(position["leverage"]),
                 order_type="market",  # Market order to close the position
                 margin_mode=position["marginMode"],  # Use the same margin mode
-                clientOrderId=client_order_id
+                clientOrderId=client_order_id,
+                scale_lot_size=False  # Do not scale the lot size for closing
             )
 
             print(f"Position Closed: {order}")
@@ -211,43 +264,75 @@ class BloFin:
 
         except Exception as e:
             print(f"Error closing position: {str(e)}")
-
-    def map_blofin_position_to_unified(self, position: dict) -> UnifiedPosition:
-        """Convert a BloFin position response into a UnifiedPosition object."""
-        size = abs(float(position.get("positions", 0)))  # Handle both long and short positions
-        direction = "long" if float(position.get("positions", 0)) > 0 else "short"
-
-        return UnifiedPosition(
-            symbol=position["instId"],
-            size=size,
-            average_entry_price=float(position.get("averagePrice", 0)),
-            leverage=float(position.get("leverage", 1)),
-            direction=direction,
-            unrealized_pnl=float(position.get("unrealizedPnl", 0)),
-            exchange=self.exchange_name,
-        )
-
-    async def fetch_and_map_positions(self, symbol: str):
-        """Fetch open positions from BloFin and convert them to UnifiedPosition objects."""
+            
+    async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
+        """
+        Reconcile the current position with the target size, leverage, and margin mode.
+        """
         try:
-            # Fetch positions filtered by symbol directly
-            response = self.blofin_client.trading.get_positions(inst_id=symbol)
-            positions = response.get("data", [])
+            unified_positions = await self.fetch_and_map_positions(symbol)
+            current_position = unified_positions[0] if unified_positions else None
 
-            # Convert to UnifiedPosition objects
-            unified_positions = [
-                self.map_blofin_position_to_unified(pos) 
-                for pos in positions 
-                if float(pos.get("positions", 0)) != 0
-            ]
+            if size != 0:
+                size, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
 
-            for unified_position in unified_positions:
-                print(f"Unified Position: {unified_position}")
+            # Initialize position state variables
+            current_size = current_position.size if current_position else 0
+            current_margin_mode = current_position.margin_mode if current_position else None
+            current_leverage = current_position.leverage if current_position else None
 
-            return unified_positions
+            # Check for margin mode or leverage changes
+            if (current_margin_mode != margin_mode or current_leverage != leverage) and current_size != 0:
+                print(f"Adjusting account margin mode to {margin_mode}.")
+                try:
+                    self.bybit_client.set_margin_mode(
+                        setMarginMode=margin_mode
+                    )
+                except Exception as e:
+                    print(f"Failed to adjust margin mode: {str(e)}")
+
+                print(f"Adjusting leverage to {leverage} for {symbol}.")
+                try:
+                    self.bybit_client.set_leverage(
+                        symbol=symbol,
+                        category="linear",
+                        buyLeverage=leverage,
+                        sellLeverage=leverage
+                    )
+                except Exception as e:
+                    print(f"Failed to adjust leverage: {str(e)}")
+
+            # Determine if we need to close the current position before opening a new one
+            if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
+                print(f"Flipping position from {current_size} to {size}. Closing current position.")
+                await self.close_position(symbol)  # Close the current position
+
+                # Update current size to 0 after closing the position
+                current_size = 0
+
+            # Calculate the remaining size difference after any position closure
+            size_diff = size - current_size
+            print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
+
+            if size_diff == 0:
+                print(f"Position for {symbol} is already at the target size.")
+                return
+
+            # Determine the side of the new order (buy/sell)
+            side = "Buy" if size_diff > 0 else "Sell"
+            size_diff = abs(size_diff)  # Work with absolute size for the order
+
+            print(f"Placing a {side} order to adjust position by {size_diff}.")
+            await self.open_market_position(
+                symbol=symbol,
+                side=side.lower(),
+                size=size_diff,
+                leverage=leverage,
+                margin_mode=margin_mode,
+                scale_lot_size=False  # Preserving the scale_lot_size parameter
+            )
         except Exception as e:
-            print(f"Error mapping BloFin positions: {str(e)}")
-            return []
+            print(f"Error reconciling position: {str(e)}")
 
 
 async def main():
@@ -263,23 +348,32 @@ async def main():
     # tickers = await blofin.fetch_tickers(symbol="BTC-USDT")  # Fetch market tickers
     # print(tickers)
     
-    # order_results = await blofin.place_limit_order()
+    # order_results = await blofin._place_limit_order_test()
     # print(order_results)    
     
-    order_results = await blofin.open_market_position(
-        symbol="BTC-USDT", 
-        side="sell", 
-        size=0.002, 
-        leverage=5
-    )
-    print(order_results)
+    # order_results = await blofin.open_market_position(
+    #     symbol="BTC-USDT", 
+    #     side="sell", 
+    #     size=0.002, 
+    #     leverage=5,
+    #     margin_mode="isolated",
+    # )
+    # print(order_results)
     
-    import time
-    time.sleep(5)
+    # import time
+    # time.sleep(5)
         
-    close_result = await blofin.close_position(symbol="BTC-USDT")
-    print(close_result)
+    # close_result = await blofin.close_position(symbol="BTC-USDT")
+    # print(close_result)
 
+    # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
+    await blofin.reconcile_position(
+        symbol="BTC-USDT",   # Symbol to adjust
+        size=0,  # Desired position size (positive for long, negative for short, zero to close)
+        leverage=5,         # Desired leverage
+        margin_mode="isolated"  # Desired margin mode
+    )
+    
     # orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
     # print(orders)   
     
