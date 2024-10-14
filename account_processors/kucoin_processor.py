@@ -139,7 +139,7 @@ class KuCoin:
             print(f"Ordering {lots} lots @ {price}")
             #quit()
             
-            # set leverage and margin mode    
+            # set margin mode    
             try:
                 self.trade_client.modify_margin_mode(
                     symbol=symbol,
@@ -163,6 +163,68 @@ class KuCoin:
             print(f"Limit Order Placed: {order_id}")
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
+
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode="ISOLATED", is_lot_size=False):
+        """Open a position with a market order on KuCoin Futures."""
+        try:
+            client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+            # If the size is already in lot size, don't scale it
+            lots = size if is_lot_size else (await self.scale_size_and_price(symbol, size, price=0))[0]
+            print(f"Opening {lots} lots of {symbol} with market order")
+
+            # Set leverage
+            try:
+                self.trade_client.set_leverage(
+                    symbol=symbol,
+                    marginMode=margin_mode,
+                )
+            except Exception as e:
+                print(f"Leverage unchanged: {str(e)}")
+
+            # Place the market order
+            order = self.trade_client.create_market_order(
+                symbol=symbol,
+                side=side,
+                size=lots,
+                lever=leverage,
+                clientOid=client_oid,
+            )
+            print(f"Market Order Placed: {order}")
+            return order
+
+        except Exception as e:
+            print(f"Error placing market order: {str(e)}")
+
+    async def close_position(self, symbol: str):
+        """Close the open position for a specific symbol on KuCoin Futures."""
+        try:
+            # Fetch open positions
+            position = await self.fetch_open_positions(symbol)
+            if not position:
+                print(f"No open position found for {symbol}.")
+                return None
+
+            # Extract position details
+            size = abs(float(position["currentQty"]))  # Use absolute size for closing
+            side = "sell" if float(position["currentQty"]) > 0 else "buy"  # Reverse side to close
+
+            print(f"Closing {size} lots of {symbol} with market order.")
+
+            # Place the market order to close the position
+            close_order = await self.open_market_position(
+                symbol=symbol,
+                side=side,
+                size=size,
+                leverage=int(position["leverage"]),
+                margin_mode=position["marginMode"],
+                is_lot_size=True  # Indicate that the size is already in lot size
+            )
+            print(f"Position Closed: {close_order}")
+            return close_order
+
+        except Exception as e:
+            print(f"Error closing position: {str(e)}")
 
     def map_kucoin_position_to_unified(self, position: dict) -> UnifiedPosition:
         """Convert a KuCoin position response into a UnifiedPosition object."""
@@ -214,8 +276,24 @@ async def main():
     # tickers = await kucoin.fetch_tickers(symbol="XBTUSDTM")  # Fetch market tickers
     # print(tickers)
     
-    order_results = await kucoin.place_limit_order()
-    print(order_results)
+    # order_results = await kucoin.place_limit_order()
+    # print(order_results)
+    
+    # Open a market position
+    open_order = await kucoin.open_market_position(
+        symbol="XBTUSDTM",
+        side="sell",
+        size=0.002,
+        leverage=5,
+    )
+    print(open_order)
+
+    import time
+    time.sleep(5)  # Wait for a bit to ensure the order is processed
+
+    # Close the position
+    close_order = await kucoin.close_position(symbol="XBTUSDTM")
+    print(close_order)
     
     # orders = await kucoin.fetch_open_orders(symbol="XBTUSDTM")          # Fetch open orders
     # print(orders)    

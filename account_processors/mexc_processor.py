@@ -165,6 +165,43 @@ class MEXC:
             print(f"Limit Order Placed: {order}")
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
+        
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int):
+        """Open a market position."""
+        try:
+            client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+            lots, _ = await self.scale_size_and_price(symbol, size, price=0)
+            print(f"Opening {lots} lots of {symbol} with market order")
+
+            order = self.futures_client.order(
+                symbol=symbol,
+                vol=lots,
+                side=side,
+                type=2,  # Market order
+                leverage=leverage,
+                external_oid=client_oid
+            )
+            print(f"Market Order Placed: {order}")
+            return order
+        except Exception as e:
+            print(f"Error placing market order: {str(e)}")
+
+    async def close_position(self, symbol: str):
+        """Close the open position."""
+        try:
+            positions = await self.fetch_open_positions(symbol)
+            if not positions:
+                print(f"No open position found for {symbol}.")
+                return None
+
+            position = positions[0]
+            size = abs(float(position["vol"]))
+            side = 2 if position["posSide"] == 1 else 4  # Reverse side
+
+            print(f"Closing {size} lots of {symbol} with market order.")
+            return await self.open_market_position(symbol, side, size, leverage=int(position["leverage"]))
+        except Exception as e:
+            print(f"Error closing position: {str(e)}")
 
     def map_mexc_position_to_unified(self, position: dict) -> UnifiedPosition:
         """Convert a MEXC position response into a UnifiedPosition object."""
@@ -213,8 +250,23 @@ async def main():
     # tickers = await mexc.fetch_tickers(symbol="BTC_USDT")  # Fetch market tickers
     # print(tickers)
     
-    order_results = await mexc.place_limit_order()
-    print(order_results)
+    # order_results = await mexc.place_limit_order()
+    # print(order_results)
+    
+    open_order = await mexc.open_market_position(
+        symbol="BTC_USDT",
+        side="sell",
+        size=0.002,
+        leverage=5,
+    )
+    print(open_order)
+
+    import time
+    time.sleep(5)  # Wait for a bit to ensure the order is processed
+
+    # Close the position
+    close_order = await mexc.close_position(symbol="BTC_USDT")
+    print(close_order)
     
     # orders = await mexc.fetch_open_orders(symbol="BTC_USDT")          # Fetch open orders
     # print(orders)

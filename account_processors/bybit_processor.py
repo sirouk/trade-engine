@@ -178,6 +178,77 @@ class ByBit:
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode='ISOLATED_MARGIN'):
+        """Open a position with a market order."""
+        try:
+            # Set parameters for the market order
+            category = "linear"  # Can vary for other exchanges
+            order_type = "Market"
+            client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+            # Fetch and scale the size
+            lots, _ = await self.scale_size_and_price(symbol, size, price=0)  # Price is irrelevant for market orders
+            print(f"Opening {lots} lots of {symbol} with market order")
+
+            try:
+                self.bybit_client.set_margin_mode(
+                    setMarginMode=margin_mode,
+                )   
+            except Exception as e:
+                print(f"Margin Mode unchanged: {str(e)}")
+                
+            # Set leverage if required
+            try:
+                self.bybit_client.set_leverage(
+                    symbol=symbol, 
+                    category=category, 
+                    buyLeverage=str(leverage), 
+                    sellLeverage=str(leverage)
+                )
+            except Exception as e:
+                print(f"Leverage unchanged: {str(e)}")
+
+            # Place the market order
+            order = self.bybit_client.place_order(
+                category=category,
+                symbol=symbol,
+                side=side,
+                qty=lots,
+                order_type=order_type,
+                isLeverage=1,
+                orderLinkId=client_oid,
+                positionIdx=0  # one-way mode
+            )
+            print(f"Market Order Placed: {order}")
+            return order
+
+        except Exception as e:
+            print(f"Error placing market order: {str(e)}")
+
+    async def close_position(self, symbol: str):
+        """Close the position for a specific symbol."""
+        try:
+            # Fetch open positions to determine the side to close
+            positions = await self.fetch_open_positions(symbol)
+            if not positions["result"]["list"]:
+                print(f"No open position found for {symbol}.")
+                return None
+
+            position = positions["result"]["list"][0]
+            side = "Sell" if position["side"].lower() == "buy" else "Buy"
+            size = float(position["size"])
+            leverage = float(position["leverage"])
+
+            print(f"Closing {size} lots of {symbol} with market order.")
+
+            # Place a market order in the opposite direction to close the position
+            order = await self.open_market_position(symbol, side, size, leverage=leverage)
+            print(f"Position Closed: {order}")
+            return order
+
+        except Exception as e:
+            print(f"Error closing position: {str(e)}")
+
     def map_bybit_position_to_unified(self, position: dict) -> UnifiedPosition:
         """Convert a Bybit position response into a UnifiedPosition object."""
         size = abs(float(position.get("size", 0)))
@@ -227,8 +298,22 @@ async def main():
     # tickers = await bybit.fetch_tickers(symbol="BTCUSDT")  # Fetch market tickers
     # print(tickers)
     
-    order_results = await bybit.place_limit_order()
+    # order_results = await bybit.place_limit_order()
+    # print(order_results)
+    
+    order_results = await bybit.open_market_position(
+        symbol="BTCUSDT", 
+        side="Sell", 
+        size=0.002, 
+        leverage=5
+    )
     print(order_results)
+    
+    import time
+    time.sleep(5)
+    
+    close_result = await bybit.close_position(symbol="BTCUSDT")
+    print(close_result)
     
     # orders = await bybit.fetch_open_orders(symbol="BTCUSDT")          # Fetch open orders
     # print(orders)

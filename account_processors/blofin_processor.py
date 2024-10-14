@@ -144,6 +144,74 @@ class BloFin:
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode="isolated"):
+        """Open a position with a market order on BloFin."""
+        try:
+            position_side = "net"  # Adjust based on your account mode (e.g., 'net', 'long', 'short')
+            client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+
+            # Fetch and scale the size
+            lots, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
+            print(f"Opening {lots} lots of {symbol} with market order")
+
+            # Place the market order
+            order = self.blofin_client.trading.place_order(
+                inst_id=symbol,
+                side=side,
+                position_side=position_side,
+                price=0, # not needed for market order
+                size=lots,
+                leverage=leverage,
+                order_type="market",  # Market order type
+                margin_mode=margin_mode,
+                clientOrderId=client_order_id,
+            )
+            print(f"Market Order Placed: {order}")
+            return order
+
+        except Exception as e:
+            print(f"Error placing market order: {str(e)}")
+
+    async def close_position(self, symbol: str):
+        """Close the position for a specific symbol on BloFin."""
+        try:
+            # Fetch open positions for the specified symbol
+            response = await self.fetch_open_positions(symbol)
+            positions = response.get("data", [])
+
+            if not positions:
+                print(f"No open position found for {symbol}.")
+                return None
+
+            # Extract the position details
+            position = positions[0]
+            size = float(position["positions"])  # Use the 'positions' value directly
+
+            # Determine the side based on the position size
+            side = "sell" if size > 0 else "buy"  # Long -> Sell, Short -> Buy
+            size = abs(size)  # Negate size by using its absolute value
+            print(f"Closing {size} lots of {symbol} with a market order.")
+
+            # Place a market order in the opposite direction to close the position
+            client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+            order = self.blofin_client.trading.place_order(
+                inst_id=symbol,
+                side=side,
+                position_side=position["positionSide"],  # Ensure the same position mode
+                price=0,
+                size=size,
+                leverage=int(position["leverage"]),
+                order_type="market",  # Market order to close the position
+                margin_mode=position["marginMode"],  # Use the same margin mode
+                clientOrderId=client_order_id
+            )
+
+            print(f"Position Closed: {order}")
+            return order
+
+        except Exception as e:
+            print(f"Error closing position: {str(e)}")
+
     def map_blofin_position_to_unified(self, position: dict) -> UnifiedPosition:
         """Convert a BloFin position response into a UnifiedPosition object."""
         size = abs(float(position.get("positions", 0)))  # Handle both long and short positions
@@ -195,9 +263,23 @@ async def main():
     # tickers = await blofin.fetch_tickers(symbol="BTC-USDT")  # Fetch market tickers
     # print(tickers)
     
-    order_results = await blofin.place_limit_order()
+    # order_results = await blofin.place_limit_order()
+    # print(order_results)    
+    
+    order_results = await blofin.open_market_position(
+        symbol="BTC-USDT", 
+        side="sell", 
+        size=0.002, 
+        leverage=5
+    )
     print(order_results)
     
+    import time
+    time.sleep(5)
+        
+    close_result = await blofin.close_position(symbol="BTC-USDT")
+    print(close_result)
+
     # orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
     # print(orders)   
     
