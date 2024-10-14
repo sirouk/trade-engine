@@ -5,6 +5,11 @@ def round_to_tick_size(value, tick_size):
     tick_size_decimal = Decimal(str(tick_size))
     value_decimal = Decimal(str(value))
 
-    # Use quantize to ensure rounding to tick size precision
+    # Round down to nearest tick size
     rounded_value = (value_decimal // tick_size_decimal) * tick_size_decimal
     return float(rounded_value)
+
+def calculate_lots(desired_btc, contract_value):
+    """Calculate the number of lots based on desired BTC amount and contract value."""
+    lots = Decimal(str(desired_btc)) / Decimal(str(contract_value))
+    return float(lots)
