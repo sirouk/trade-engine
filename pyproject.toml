@@ -34,7 +34,7 @@ dependencies = [
     "ujson",
     "pybit",
     "blofin",
-    "kucoin-futures-python",
+    "kucoin-futures-python @ git+https://github.com/sirouk/kucoin-futures-python-sdk",
     "pymexc @ git+https://github.com/sirouk/pymexc",
 ]
 
