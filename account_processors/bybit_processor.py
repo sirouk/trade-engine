@@ -408,7 +408,8 @@ async def main():
     #     symbol="BTCUSDT", 
     #     side="Sell", 
     #     size=0.002, 
-    #     leverage=5
+    #     leverage=5,
+    #     margin_mode="ISOLATED_MARGIN",
     # )
     # print(order_results)
     

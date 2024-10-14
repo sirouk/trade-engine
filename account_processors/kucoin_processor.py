@@ -210,7 +210,7 @@ class KuCoin:
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
-    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode="ISOLATED", scale_lot_size: bool = True, adjust_margin_mode: bool = True):
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True, adjust_margin_mode: bool = True):
         """Open a position with a market order on KuCoin Futures."""
         try:
             
@@ -374,6 +374,7 @@ async def main():
     #     side="sell",
     #     size=0.002,
     #     leverage=5,
+    #     margin_mode="ISOLATED",
     # )
     # print(open_order)
 
