@@ -239,7 +239,7 @@ class ByBit:
         except Exception as e:
             print(f"Error placing limit order: {str(e)}")
 
-    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
+    async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True, adjust_leverage: bool = True, adjust_margin_mode: bool = True):
         """Open a position with a market order."""
         try:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -248,24 +248,26 @@ class ByBit:
             else:
                 lots = size
 
-            print(f"Opening {lots} lots of {symbol} with a {side} order.")
+            print(f"Processing {lots} lots of {symbol} with a {side} order.")
 
-            try:
-                self.bybit_client.set_margin_mode(
-                    setMarginMode=margin_mode
-                )
-            except Exception as e:
-                print(f"Margin Mode unchanged: {str(e)}")
+            if adjust_margin_mode:
+                try:
+                    self.bybit_client.set_margin_mode(
+                        setMarginMode=margin_mode
+                    )
+                except Exception as e:
+                    print(f"Margin Mode unchanged: {str(e)}")
             
-            try:
-                self.bybit_client.set_leverage(
-                    symbol=symbol, 
-                    category="linear", 
-                    buyLeverage=str(leverage), 
-                    sellLeverage=str(leverage),
-                )
-            except Exception as e:
-                print(f"Leverage unchanged: {str(e)}")
+            if adjust_leverage:
+                try:
+                    self.bybit_client.set_leverage(
+                        symbol=symbol, 
+                        category="linear", 
+                        buyLeverage=str(leverage), 
+                        sellLeverage=str(leverage),
+                    )
+                except Exception as e:
+                    print(f"Leverage unchanged: {str(e)}")
 
             order = self.bybit_client.place_order(
                 category="linear",
@@ -306,7 +308,9 @@ class ByBit:
                 size=size, 
                 leverage=leverage, 
                 margin_mode=margin_mode, 
-                scale_lot_size=False
+                scale_lot_size=False,
+                adjust_leverage=False,
+                adjust_margin_mode=False,
             )
             print(f"Position Closed: {order}")
             return order
@@ -332,9 +336,15 @@ class ByBit:
             current_size = current_position.size if current_position else 0
             current_margin_mode = current_position.margin_mode if current_position else None
             current_leverage = current_position.leverage if current_position else None
-
+            
+            # Determine if the position is flipping (long to short or vice versa)
+            if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
+                print(f"Flipping position from {current_size} to {size}. Closing current position first.")
+                await self.close_position(symbol)  # Close the current position
+                current_size = 0  # Reset current size to 0 after closure
+                
             # Adjust margin mode and leverage if necessary, and the position exists
-            if current_size != 0:
+            if current_size != 0 and size != 0:
                 if current_margin_mode != margin_mode:
                     print(f"Adjusting margin mode to {margin_mode}.")
                     try:
@@ -354,12 +364,6 @@ class ByBit:
                     except Exception as e:
                         print(f"Failed to adjust leverage: {str(e)}")
 
-            # Determine if the position is flipping (long to short or vice versa)
-            if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
-                print(f"Flipping position from {current_size} to {size}. Closing current position first.")
-                await self.close_position(symbol)  # Close the current position
-                current_size = 0  # Reset current size to 0 after closure
-
             # Calculate the size difference after potential closure
             size_diff = size - current_size
             print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
@@ -376,11 +380,13 @@ class ByBit:
             print(f"Placing a {side} order to adjust position by {size_diff}.")
             await self.open_market_position(
                 symbol=symbol,
-                side=side.capitalize(),  # Ensure correct capitalization for the API
+                side=side.capitalize(),
                 size=size_diff,
                 leverage=leverage,
                 margin_mode=margin_mode,
-                scale_lot_size=False  # Preserve the scale_lot_size parameter
+                scale_lot_size=False,
+                adjust_leverage=size != 0,
+                adjust_margin_mode=size != 0,
             )
         except Exception as e:
             print(f"Error reconciling position: {str(e)}")
@@ -413,16 +419,17 @@ async def main():
     # import time
     # time.sleep(5)
     
-    # close_result = await bybit.close_position(symbol="BTCUSDT")
-    # print(close_result)
     
     # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
     await bybit.reconcile_position(
         symbol="BTCUSDT",   # Symbol to adjust
-        size=-0.002,  # Desired position size (positive for long, negative for short, zero to close)
-        leverage=3,         # Desired leverage
+        size=0,  # Desired position size (positive for long, negative for short, zero to close)
+        leverage=5,         # Desired leverage
         margin_mode="ISOLATED_MARGIN"  # Desired margin mode
     )
+    
+    # close_result = await bybit.close_position(symbol="BTCUSDT")
+    # print(close_result)
     
     # orders = await bybit.fetch_open_orders(symbol="BTCUSDT")          # Fetch open orders
     # print(orders)
