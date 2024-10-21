@@ -288,30 +288,30 @@ class BloFin:
             # Determine if we need to close the current position before opening a new one
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
                 print(f"Flipping position from {current_size} to {size}. Closing current position.")
-                await self.close_position(symbol)  # Close the current position
-
-                # Update current size to 0 after closing the position
+                await self.close_position(symbol)
                 current_size = 0
-                
+            
             # Check for margin mode or leverage changes
-            if (current_margin_mode != margin_mode or current_leverage != leverage) and current_size != 0 and size != 0:
-                print(f"Adjusting account margin mode to {margin_mode}.")
-                try:
-                    self.blofin_client.trading.set_margin_mode(
-                        margin_mode=margin_mode
-                    )
-                except Exception as e:
-                    print(f"Failed to adjust margin mode: {str(e)}")
+            if current_size != 0 and size != 0:
+                
+                # Since Blofin does not support changing margin mode or leverage on existing positions, we need to close the position first
+                if current_margin_mode != margin_mode:
+                    print(f"Margin mode change detected. Closing current position to adjust margin mode from {current_margin_mode} to {margin_mode}.")
+                    await self.close_position(symbol)
+                    current_size = 0  
+                    
+                    # no need to change margin mode here, as new position will be opened with the desired margin mode
 
-                print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
-                try:
-                    self.blofin_client.trading.set_leverage(
-                        inst_id=symbol,
-                        leverage=leverage,
-                        margin_mode=margin_mode,
-                    )
-                except Exception as e:
-                    print(f"Failed to adjust leverage: {str(e)}")
+                if current_leverage != leverage:
+                    print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
+                    try:
+                        self.blofin_client.trading.set_leverage(
+                            inst_id=symbol,
+                            leverage=leverage,
+                            margin_mode=margin_mode,
+                        )
+                    except Exception as e:
+                        print(f"Failed to adjust leverage: {str(e)}")
 
             # Calculate the remaining size difference after any position closure
             size_diff = size - current_size
@@ -370,7 +370,7 @@ async def main():
     await blofin.reconcile_position(
         symbol="BTC-USDT",   # Symbol to adjust
         size=0,  # Desired position size (positive for long, negative for short, zero to close)
-        leverage=3,         # Desired leverage
+        leverage=5,         # Desired leverage
         margin_mode="isolated"  # Desired margin mode
     )
         

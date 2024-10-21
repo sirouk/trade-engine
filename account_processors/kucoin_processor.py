@@ -101,7 +101,7 @@ class KuCoin:
         if kucoin_margin_mode is None:
             raise ValueError("Margin mode not found in position data.")
         
-        margin_mode = self.inverse_margin_mode_map.get(kucoin_margin_mode, margin_mode)
+        margin_mode = self.inverse_margin_mode_map.get(kucoin_margin_mode, kucoin_margin_mode)
             
         return UnifiedPosition(
             symbol=position["symbol"],
@@ -320,15 +320,15 @@ class KuCoin:
                     await self.close_position(symbol)  # Close the current position
                     current_size = 0 # Update current size to 0 after closing the position
 
-                    print(f"Adjusting account margin mode to {margin_mode}.")
-                    kucoin_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
-                    try:
-                        self.trade_client.modify_margin_mode(
-                            symbol=symbol,
-                            marginMode=kucoin_margin_mode,
-                        )
-                    except Exception as e:
-                        print(f"Margin Mode unchanged: {str(e)}")
+                    # print(f"Adjusting account margin mode to {margin_mode}.")
+                    # kucoin_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
+                    # try:
+                    #     self.trade_client.modify_margin_mode(
+                    #         symbol=symbol,
+                    #         marginMode=kucoin_margin_mode,
+                    #     )
+                    # except Exception as e:
+                    #     print(f"Margin Mode unchanged: {str(e)}")
 
                 # if the leverage is not within a 10% tolerance, close the position
                 if current_leverage > 0 and abs(current_leverage - leverage) > 0.10 * leverage and current_size != 0:
@@ -395,7 +395,7 @@ async def main():
     # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
     await kucoin.reconcile_position(
         symbol="XBTUSDTM",   # Symbol to adjust
-        size=-0.001,  # Desired position size (positive for long, negative for short, zero to close)
+        size=0.001,  # Desired position size (positive for long, negative for short, zero to close)
         leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
         margin_mode="isolated"  # Desired margin mode (position must be closed to adjust)
     )
