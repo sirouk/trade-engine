@@ -20,7 +20,13 @@ class MEXC:
             api_key=self.credentials.mexc.api_key, 
             api_secret=self.credentials.mexc.api_secret
         )
+        
+        self.margin_mode_map = {
+            "isolated": 1,
+            "cross": 2
+        }
 
+        self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()}
 
     async def fetch_balance(self, instrument="USDT"):
         """Fetch the futures account balance for a specific instrument."""
@@ -88,9 +94,11 @@ class MEXC:
             size = -size
             
         # Use provided margin mode if available, otherwise derive from tradeMode
-        margin_mode = position.get("open_type")
-        if margin_mode is None:
+        mexc_margin_mode = position.get("open_type")
+        if mexc_margin_mode is None:
             raise ValueError("Margin mode not found in position data.")
+        
+        margin_mode = self.margin_mode_map.get(mexc_margin_mode, mexc_margin_mode)
         
         return UnifiedPosition(
             symbol=position["symbol"],
@@ -190,7 +198,7 @@ class MEXC:
             size=0.001 # in quantity of symbol
             leverage=3
             order_type=1 # Limit order
-            margin_mode=1 # 1:isolated 2:cross
+            mex_margin_mode=1 # 1:isolated 2:cross
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
             # Fetch and scale the size and price
@@ -204,7 +212,7 @@ class MEXC:
                 vol=lots,
                 side=side,
                 type=order_type,
-                open_type=margin_mode,
+                open_type=mex_margin_mode,
                 leverage=leverage,
                 external_oid=client_oid
             )
@@ -221,13 +229,15 @@ class MEXC:
             lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
             print(f"Processing {lots} lots of {symbol} with a {side} order")
             
+            mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
+            
             order = self.futures_client.order(
                 symbol=symbol,
                 vol=lots,
                 side=side,
                 price=0,  # Market order
                 type=2,  # Market order
-                open_type=margin_mode,
+                open_type=mexc_margin_mode,
                 leverage=leverage,
                 external_oid=client_oid
             )
@@ -284,10 +294,11 @@ class MEXC:
                     current_size = 0 # Update current size to 0 after closing the position
 
                     print(f"Adjusting account margin mode to {margin_mode}.")
+                    mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                     try:
                         self.trade_client.modify_margin_mode(
                             symbol=symbol,
-                            marginMode=margin_mode,
+                            marginMode=mexc_margin_mode,
                         )
                     except Exception as e:
                         print(f"Margin Mode unchanged: {str(e)}")
@@ -356,7 +367,7 @@ async def main():
         symbol="BTC_USDT",   # Symbol to adjust
         size=-0.001,  # Desired position size (positive for long, negative for short, zero to close)
         leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
-        margin_mode=1  # 1:isolated 2:cross
+        margin_mode="isolated"  # 1:isolated 2:cross
     )    
 
     # Close the position

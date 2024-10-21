@@ -20,6 +20,13 @@ class BloFin:
             api_secret=self.credentials.blofin.api_secret,
             passphrase=self.credentials.blofin.api_passphrase
         )
+        
+        self.margin_mode_map = { # unusued as they are not needed
+            "isolated": "isolated",
+            "cross": "cross"
+        }
+        
+        self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()} # unusued as they are not needed
 
     async def fetch_balance(self, instrument="USDT"):
         try:

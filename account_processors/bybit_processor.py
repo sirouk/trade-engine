@@ -24,7 +24,13 @@ class ByBit:
             api_secret=self.credentials.bybit.api_secret,
             testnet=self.TESTNET
         )
+        
+        self.margin_mode_map = {
+            "isolated": "ISOLATED_MARGIN",
+            "cross": "REGULAR_MARGIN"
+        }
 
+        self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()}
 
     async def fetch_balance(self, instrument="USDT"):
         try:
@@ -59,7 +65,8 @@ class ByBit:
         results = self.bybit_client.get_account_info()
         account = results.get("result", {})
         if "marginMode" in account:
-            return account.get("marginMode", None)
+            bybit_margin_mode = account.get("marginMode")
+            return self.margin_mode_map.get(bybit_margin_mode, bybit_margin_mode)
         raise ValueError("Margin mode not found for account")
 
     async def fetch_and_map_positions(self, symbol: str, fetch_margin_mode: bool = False) -> list:
@@ -100,7 +107,10 @@ class ByBit:
             size = -size
 
         # Use provided margin mode if available, otherwise derive from tradeMode
-        margin_mode = margin_mode or ("ISOLATED_MARGIN" if position.get("tradeMode") == 1 else "CROSS_MARGIN")
+        margin_mode = margin_mode or ("isolated" if position.get("tradeMode") == 1 else "cross")
+        
+        # User inverse mapping to convert margin mode to unified format
+        margin_mode = self.inverse_margin_mode_map.get(margin_mode, margin_mode)
 
         return UnifiedPosition(
             symbol=position["symbol"],
@@ -188,7 +198,7 @@ class ByBit:
             isLeverage=1 # 1:leveraged 2: not leveraged
             order_type="Limit"
             time_in_force="IOC"
-            margin_mode='ISOLATED_MARGIN' # ISOLATED_MARGIN, REGULAR_MARGIN(i.e. Cross margin), PORTFOLIO_MARGIN
+            bybit_margin_mode='ISOLATED_MARGIN' # ISOLATED_MARGIN, REGULAR_MARGIN(i.e. Cross margin), PORTFOLIO_MARGIN
             reduce_only=False
             close_on_trigger=False
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -201,7 +211,7 @@ class ByBit:
             # set leverage and margin mode    
             try:
                 self.bybit_client.set_margin_mode(
-                    setMarginMode=margin_mode,
+                    setMarginMode=bybit_margin_mode,
                 )   
             except Exception as e:
                 print(f"Margin Mode unchanged: {str(e)}")
@@ -247,9 +257,10 @@ class ByBit:
             print(f"Processing {lots} lots of {symbol} with a {side} order.")
 
             if adjust_margin_mode:
+                bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                 try:
                     self.bybit_client.set_margin_mode(
-                        setMarginMode=margin_mode
+                        setMarginMode=bybit_margin_mode
                     )
                 except Exception as e:
                     print(f"Margin Mode unchanged: {str(e)}")
@@ -293,7 +304,7 @@ class ByBit:
             side = "Sell" if position["side"].lower() == "buy" else "Buy"
             size = float(position["size"])
             leverage = float(position["leverage"])
-            margin_mode = "ISOLATED_MARGIN" if position["tradeMode"] == 1 else "CROSS_MARGIN"
+            margin_mode = "isolated" if position["tradeMode"] == 1 else "cross"
 
             print(f"Closing {size} lots of {symbol} with market order.")
 
@@ -343,8 +354,9 @@ class ByBit:
             if current_size != 0 and size != 0:
                 if current_margin_mode != margin_mode:
                     print(f"Adjusting margin mode to {margin_mode}.")
+                    bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                     try:
-                        self.bybit_client.set_margin_mode(setMarginMode=margin_mode)
+                        self.bybit_client.set_margin_mode(setMarginMode=bybit_margin_mode)
                     except Exception as e:
                         print(f"Failed to adjust margin mode: {str(e)}")
 
@@ -409,7 +421,7 @@ async def main():
     #     side="Sell", 
     #     size=0.002, 
     #     leverage=5,
-    #     margin_mode="ISOLATED_MARGIN",
+    #     margin_mode="isolated",
     # )
     # print(order_results)
     
@@ -422,7 +434,7 @@ async def main():
         symbol="BTCUSDT",   # Symbol to adjust
         size=0,  # Desired position size (positive for long, negative for short, zero to close)
         leverage=5,         # Desired leverage
-        margin_mode="ISOLATED_MARGIN"  # Desired margin mode
+        margin_mode="isolated"  # Desired margin mode
     )
     
     # close_result = await bybit.close_position(symbol="BTCUSDT")

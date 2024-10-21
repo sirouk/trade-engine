@@ -29,7 +29,13 @@ class KuCoin:
         )
 
         self.market_client = Market()
+        
+        self.margin_mode_map = {
+            "isolated": "ISOLATED",
+            "cross": "CROSS"
+        }
 
+        self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()}
 
     async def fetch_balance(self, instrument="USDT"):
         """Fetch futures account balance."""
@@ -91,9 +97,11 @@ class KuCoin:
             size = -size
             
         # Use provided margin mode if available, otherwise derive from tradeMode
-        margin_mode = position.get("marginMode")
-        if margin_mode is None:
+        kucoin_margin_mode = position.get("marginMode")
+        if kucoin_margin_mode is None:
             raise ValueError("Margin mode not found in position data.")
+        
+        margin_mode = self.inverse_margin_mode_map.get(kucoin_margin_mode, margin_mode)
             
         return UnifiedPosition(
             symbol=position["symbol"],
@@ -177,7 +185,7 @@ class KuCoin:
             leverage=3
             order_type="limit" # limit or market
             time_in_force="IOC" # GTC, GTT, IOC, FOK (IOC as FOK has unexpected behavior)
-            margin_mode="ISOLATED" # ISOLATED, CROSS, default: ISOLATED
+            kucoin_margin_mode="ISOLATED" # ISOLATED, CROSS, default: ISOLATED
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
 
             # Fetch and scale the size and price
@@ -189,7 +197,7 @@ class KuCoin:
             try:
                 self.trade_client.modify_margin_mode(
                     symbol=symbol,
-                    marginMode=margin_mode,
+                    marginMode=kucoin_margin_mode,
                 )
             except Exception as e:
                 print(f"Margin Mode unchanged: {str(e)}")
@@ -203,7 +211,7 @@ class KuCoin:
                 lever=leverage,
                 orderType=order_type,
                 timeInForce=time_in_force,
-                marginMode=margin_mode,
+                marginMode=kucoin_margin_mode,
                 clientOid=client_oid
             )
             print(f"Limit Order Placed: {order_id}")
@@ -222,17 +230,19 @@ class KuCoin:
             lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
             print(f"Processing {lots} lots of {symbol} with a {side} order")
             
+            kucoin_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
+            
             if adjust_margin_mode:
-                print(f"Adjusting account margin mode to {margin_mode}.")
+                print(f"Adjusting account margin mode to {kucoin_margin_mode}.")
                 try:
                     self.trade_client.modify_margin_mode(
                         symbol=symbol,
-                        marginMode=margin_mode,
+                        marginMode=kucoin_margin_mode,
                     )
                 except Exception as e:
                     print(f"Margin Mode unchanged: {str(e)}")
                     
-            print(f"Placing a market order for {lots} lots of {symbol} with {margin_mode} margin mode and {leverage}x leverage.")
+            print(f"Placing a market order for {lots} lots of {symbol} with {kucoin_margin_mode} margin mode and {leverage}x leverage.")
             
 
             # Place the market order
@@ -242,7 +252,7 @@ class KuCoin:
                 size=lots,
                 lever=leverage,
                 clientOid=client_oid,
-                marginMode=margin_mode,
+                marginMode=kucoin_margin_mode,
             )
             print(f"Market Order Placed: {order}")
             return order
@@ -271,7 +281,7 @@ class KuCoin:
                 side=side.lower(),
                 size=size,
                 leverage=int(position["leverage"]),
-                margin_mode=position["marginMode"],
+                margin_mode=position["marginMode"], # this is kucoin margin mode
                 scale_lot_size=False,
             )
             print(f"Position Closed: {close_order}")
@@ -311,10 +321,11 @@ class KuCoin:
                     current_size = 0 # Update current size to 0 after closing the position
 
                     print(f"Adjusting account margin mode to {margin_mode}.")
+                    kucoin_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                     try:
                         self.trade_client.modify_margin_mode(
                             symbol=symbol,
-                            marginMode=margin_mode,
+                            marginMode=kucoin_margin_mode,
                         )
                     except Exception as e:
                         print(f"Margin Mode unchanged: {str(e)}")
@@ -386,7 +397,7 @@ async def main():
         symbol="XBTUSDTM",   # Symbol to adjust
         size=-0.001,  # Desired position size (positive for long, negative for short, zero to close)
         leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
-        margin_mode="ISOLATED"  # Desired margin mode (position must be closed to adjust)
+        margin_mode="isolated"  # Desired margin mode (position must be closed to adjust)
     )
     
     # # Close the position
