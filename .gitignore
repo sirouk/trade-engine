@@ -26,3 +26,4 @@ raw_signals/tradingview/*
 __pycache__/
 **.pyc
 **/credentials.json
+**/signal_weight_config.json
