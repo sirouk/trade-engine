@@ -5,6 +5,7 @@ from typing import List, Optional, Dict
 @dataclass
 class BTTSN8TradePair:
     symbol: str
+    original_symbol: str
     pair: str
     spread: float
     volume: float
