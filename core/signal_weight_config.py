@@ -136,12 +136,33 @@ def configure_signals(signal_sources):
 
     return asset_configs
 
+def print_summary(asset_configs):
+    """Print a summary of the configuration data."""
+
+    # Calculate total weight used and prepare summary
+    total_weight_used = sum(
+        signal.weight for asset in asset_configs for signal in asset.signals
+    )
+    summary = "\nSummary of Allocated Weights:\n"
+    for asset in asset_configs:
+        summary += f"\nAsset: {asset.symbol}, Leverage: {asset.leverage}\n"
+        for signal in asset.signals:
+            summary += f"  Source: {signal.source}, Original Symbol: {signal.original_symbol}, Weight: {signal.weight}\n"
+    
+    print(f"\nTotal Weight Budget Used: {total_weight_used:.2f} out of 1.0\n{summary}")
+
 def save_config(asset_configs):
-    """Save the configuration data to a JSON file."""
+    """Save the configuration data to a JSON file and print a summary."""
     config_data = [asdict(config) for config in asset_configs]
+    
+    # Print summary of configuration
+    print_summary(asset_configs)
+    
+    # Save configuration to file
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config_data, f, indent=4)
     print(f"\nConfiguration saved to {CONFIG_FILE}")
+    
 
 def main():
     signal_sources = load_recent_signals()
