@@ -11,7 +11,7 @@ CORE_ASSET_MAPPING = {
     # Add more mappings as needed
 }
 
-def get_recent_files(directory, days=1):
+def get_recent_files(directory, days=7):
     cutoff = datetime.now() - timedelta(days=days)
     recent_files = []
     for filename in os.listdir(directory):
