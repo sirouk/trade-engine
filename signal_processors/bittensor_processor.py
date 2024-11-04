@@ -14,6 +14,9 @@ CORE_ASSET_MAPPING = {
     # Add more mappings as necessary
 }
 
+LEVERAGE_LIMIT_CRYPTO = 0.5 # we will need to differentiate between crypto and forex leverage limits if we add other types in the future
+
+
 async def fetch_bittensor_signals(api_key: str, endpoint: str):
     headers = {'Content-Type': 'application/json'}
     data = {'api_key': api_key}
@@ -64,6 +67,12 @@ def process_signals(data, top_miners=None):
                 volume=trade_pair_data[3],
                 decimal_places=trade_pair_data[4]
             )
+            
+            # Calculate and cap the depth based on net_leverage
+            capped_leverage = min(position_data['net_leverage'], LEVERAGE_LIMIT_CRYPTO)  # Cap depth as per https://docs.taoshi.io/ptn/miner/overview/#leverage-limits
+            
+            # Convert net_leverage into a depth ratio
+            depth = capped_leverage / LEVERAGE_LIMIT_CRYPTO
 
             orders = [
                 BTTSN8Order(
@@ -80,6 +89,7 @@ def process_signals(data, top_miners=None):
             ]
 
             position = BTTSN8Position(
+                depth= depth,
                 average_entry_price=position_data['average_entry_price'],
                 close_ms=position_data.get('close_ms'),
                 current_return=position_data['current_return'],

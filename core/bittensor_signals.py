@@ -26,6 +26,7 @@ class BTTSN8Order:
 
 @dataclass
 class BTTSN8Position:
+    depth: float
     average_entry_price: float
     close_ms: Optional[int]  # None if position is open
     current_return: float
