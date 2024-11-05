@@ -41,81 +41,82 @@ def store_signal_on_disk(data):
     
     print(f"Raw signal stored at {file_path}")
 
-def process_signals(data, top_miners=None):
+def calculate_gradient_allocation(max_rank):
+    """Calculate gradient allocation weights for each rank based on their inverted priority."""
+    # Total weight is the sum of all rank values
+    total_weight = sum(max_rank + 1 - rank for rank in range(1, max_rank + 1))
+    
+    # Create a dictionary with rank as key and allocation as the fractional value
+    allocations = {}
+    for rank in range(1, max_rank + 1):
+        inverted_rank = max_rank + 1 - rank
+        allocations[rank] = inverted_rank / total_weight
+    return allocations
+
+def process_signals(data, top_miners=None, mapped_only=True):
     if data is None:
         return []
-    
-    signals = []
+
     # Sort miners by all_time_returns and select the top if specified
     sorted_miners = sorted(data.items(), key=lambda x: x[1].get('all_time_returns', 0), reverse=True)
     if top_miners:
         sorted_miners = sorted_miners[:top_miners]
 
-    for miner_hotkey, miner_positions in sorted_miners:
-        all_time_returns = miner_positions['all_time_returns']
-        n_positions = miner_positions['n_positions']
-        percentage_profitable = miner_positions['percentage_profitable']
-        positions = []
+    # Get allocation for each miner based on rank
+    allocations = calculate_gradient_allocation(len(sorted_miners))
+
+    # Initialize asset tracking dictionaries
+    asset_depths = {}
+    asset_prices = {}
+
+    # Iterate through the ranked miners and apply gradient allocations
+    for rank, (miner_hotkey, miner_positions) in enumerate(sorted_miners, start=1):
+        allocation_weight = allocations[rank]
+        asset_tracker = set()  # Track assets seen for this miner to prevent overcounting
 
         for position_data in miner_positions.get('positions', []):
-            trade_pair_data = position_data['trade_pair']
-            trade_pair = BTTSN8TradePair(
-                symbol=CORE_ASSET_MAPPING.get(trade_pair_data[0], trade_pair_data[0]),
-                original_symbol=trade_pair_data[0],
-                pair=trade_pair_data[1],
-                spread=trade_pair_data[2],
-                volume=trade_pair_data[3],
-                decimal_places=trade_pair_data[4]
-            )
+            original_symbol = position_data['trade_pair'][0]
+            if mapped_only and original_symbol not in CORE_ASSET_MAPPING:
+                continue
+            symbol = CORE_ASSET_MAPPING[original_symbol]
+
+            # Skip if this asset has already been counted for this miner
+            if symbol in asset_tracker:
+                continue
+            asset_tracker.add(symbol)  # Mark this asset as seen for this miner
+
+            # Calculate normalized depth based on capped leverage and allocation weight
+            capped_leverage = min(position_data['net_leverage'], LEVERAGE_LIMIT_CRYPTO)
+            normalized_depth = (capped_leverage / LEVERAGE_LIMIT_CRYPTO) * allocation_weight
+
+            # Update depth and leverage-weighted price for each asset
+            if symbol not in asset_depths:
+                asset_depths[symbol] = 0.0
+                asset_prices[symbol] = {"weighted_price_sum": 0.0, "total_depth": 0.0}
             
-            # Calculate and cap the depth based on net_leverage
-            capped_leverage = min(position_data['net_leverage'], LEVERAGE_LIMIT_CRYPTO)  # Cap depth as per https://docs.taoshi.io/ptn/miner/overview/#leverage-limits
-            
-            # Convert net_leverage into a depth ratio
-            depth = capped_leverage / LEVERAGE_LIMIT_CRYPTO
+            asset_depths[symbol] += normalized_depth
+            asset_prices[symbol]["weighted_price_sum"] += position_data['average_entry_price'] * normalized_depth
+            asset_prices[symbol]["total_depth"] += normalized_depth  # Sum of normalized depths for averaging
 
-            orders = [
-                BTTSN8Order(
-                    leverage=order_data['leverage'],
-                    order_type=order_data['order_type'],
-                    order_uuid=order_data['order_uuid'],
-                    price=order_data['price'],
-                    price_sources=order_data['price_sources'],
-                    processed_ms=order_data['processed_ms'],
-                    rank=order_data.get('rank', 0),
-                    trade_pair=trade_pair
-                )
-                for order_data in position_data['orders']
-            ]
-
-            position = BTTSN8Position(
-                depth= depth,
-                average_entry_price=position_data['average_entry_price'],
-                close_ms=position_data.get('close_ms'),
-                current_return=position_data['current_return'],
-                is_closed_position=position_data['is_closed_position'],
-                miner_hotkey=position_data['miner_hotkey'],
-                net_leverage=position_data['net_leverage'],
-                open_ms=position_data['open_ms'],
-                orders=orders,
-                position_type=position_data['position_type'],
-                position_uuid=position_data['position_uuid'],
-                return_at_close=position_data.get('return_at_close'),
-                trade_pair=trade_pair
-            )
-            positions.append(position)
-
-        miner_signal = BTTSN8MinerSignal(
-            all_time_returns=all_time_returns,
-            n_positions=n_positions,
-            percentage_profitable=percentage_profitable,
-            positions=positions,
-            thirty_day_returns=miner_positions.get('thirty_day_returns')
+    # Prepare final results with capped depth and weighted average price
+    results = []
+    for symbol, total_depth in asset_depths.items():
+        capped_depth = min(total_depth, 1.0)  # Cap total depth at 1.0
+        total_depth_for_price = asset_prices[symbol]["total_depth"]
+        
+        # Calculate weighted average price if total depth is positive
+        weighted_average_price = (
+            asset_prices[symbol]["weighted_price_sum"] / total_depth_for_price 
+            if total_depth_for_price > 0 else 0.0
         )
+        
+        results.append({
+            "symbol": symbol,
+            "depth": capped_depth,
+            "average_price": weighted_average_price
+        })
 
-        signals.append(miner_signal)
-
-    return signals
+    return results
 
 async def fetch_bittensor_signal(top_miners=None):
     credentials = load_bittensor_credentials()
@@ -132,4 +133,9 @@ async def fetch_bittensor_signal(top_miners=None):
 
 # Example standalone usage
 if __name__ == '__main__':
-    asyncio.run(fetch_bittensor_signal(top_miners=5))
+    # return signals and print them
+    signals = asyncio.run(fetch_bittensor_signal(top_miners=20))
+    for signal in signals:
+        print(signal)
+    print(f"Total signals: {len(signals)}") 
+    
