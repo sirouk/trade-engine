@@ -2,13 +2,16 @@ import os
 from datetime import datetime
 import asyncio
 import numpy as np
+from math import sqrt, log1p, prod
 from signal_processors.bittensor_processor import fetch_bittensor_signals, load_bittensor_credentials
 
-def normalize_metric(value, min_value, max_value):
+def normalize_metric(name, value, min_value, max_value):
     """Normalize a metric to a 0-1 scale."""
     if max_value - min_value == 0:
         return 0
-    return (value - min_value) / (max_value - min_value)
+    normalized = (value - min_value) / (max_value - min_value)
+    print(f"Normalizing '{name}', Value: {value}, Min: {min_value}, Max: {max_value}, Normalized: {normalized}")
+    return normalized
 
 def calculate_sharpe_ratio(position_returns):
     """Calculate the Sharpe Ratio for a series of returns."""
@@ -39,13 +42,18 @@ def get_trade_consistency_score(miner):
     positions = sorted(miner['positions'], key=lambda pos: pos['open_ms'])
     if len(positions) < 2:
         return 0  # Insufficient data
+
     intervals = [
         positions[i]['open_ms'] - positions[i - 1]['close_ms']
         for i in range(1, len(positions))
     ]
-    std_interval = np.std(intervals)
-    max_std = np.std([positions[-1]['close_ms'] - positions[0]['open_ms']])
-    return 1 - (std_interval / max_std if max_std != 0 else 0)
+    
+    # Calculate the standard deviation and mean of intervals
+    mean_interval = sum(intervals) / len(intervals)
+    std_interval = sqrt(sum((x - mean_interval) ** 2 for x in intervals) / len(intervals))
+    
+    # Normalize the score by comparing std_interval with mean_interval
+    return 1 - (std_interval / mean_interval if mean_interval != 0 else 0)
 
 def get_position_count_score(n_positions, max_positions):
     """Calculate position count score using logarithmic scaling."""
@@ -54,7 +62,15 @@ def get_position_count_score(n_positions, max_positions):
 def calculate_miner_scores(data):
     # Collect all metrics for normalization
     all_time_returns_list = [miner['all_time_returns'] for miner in data.values()]
-    thirty_day_returns_list = [miner['thirty_day_returns'] for miner in data.values()]
+
+    thirty_day_returns_list = [miner['thirty_day_returns']-1 for miner in data.values()]
+    # for key, miner in data.items():
+    #     if key == '5HYRAnpjhcT45f6udFAbfJXwUmqqeaNvte4sTjuQvDxTaQB3':
+    #         profitability = miner.get('thirty_day_returns', 'Not available')  # Use 'get' to avoid KeyError if 'profitability' doesn't exist
+    #         print(profitability)
+    #         quit()
+
+            
     profitability_list = [miner['percentage_profitable'] for miner in data.values()]
     sharpe_ratios = []
     max_drawdowns = []
@@ -75,13 +91,11 @@ def calculate_miner_scores(data):
             active_days_list.append(active_days)
         else:
             active_days_list.append(0)
-    max_active_days = max(active_days_list) if active_days_list else 1
-
-    # Determine maximum n_positions across all miners for relative scoring
-    max_positions = max(len(miner['positions']) for miner in data.values()) if data else 1
+    max_active_days = max(active_days_list, default=1)
 
     # Calculate additional metrics for each miner
     for idx, miner in enumerate(data.values()):
+
         # Prepare returns for risk-adjusted calculations
         position_returns = []
         for position in miner['positions']:
@@ -111,54 +125,75 @@ def calculate_miner_scores(data):
         # Position Count
         position_counts.append(len(miner['positions']))
 
+
     # Normalize metrics
     normalized_metrics = []
     for idx, miner in enumerate(data.values()):
-        normalized_all_time_returns = normalize_metric(
-            miner['all_time_returns'], min(all_time_returns_list), max(all_time_returns_list)
+        all_time_returns = normalize_metric(
+            'all_time_returns', miner['all_time_returns'], min(all_time_returns_list), max(all_time_returns_list)
         )
-        normalized_thirty_day_returns = normalize_metric(
-            miner['thirty_day_returns'], min(thirty_day_returns_list), max(thirty_day_returns_list)
+        thirty_day_returns = normalize_metric(
+            'thirty_day_returns', miner['thirty_day_returns']-1, min(thirty_day_returns_list), max(thirty_day_returns_list)
         )
-        normalized_profitability = normalize_metric(
-            miner['percentage_profitable'], min(profitability_list), max(profitability_list)
+        profitability = normalize_metric(
+            'profitability', miner['percentage_profitable'], min(profitability_list), max(profitability_list)
         )
-        normalized_sharpe_ratio = normalize_metric(
-            sharpe_ratios[idx], min(sharpe_ratios), max(sharpe_ratios)
+        sharpe_ratio = normalize_metric(
+            'sharpe_ratio', sharpe_ratios[idx], min(sharpe_ratios), max(sharpe_ratios)
         )
         # Since lower max drawdown is better, we invert and normalize it
-        inverted_max_drawdown = 1 - normalize_metric(
-            max_drawdowns[idx], min(max_drawdowns), max(max_drawdowns)
+        max_drawdown = normalize_metric(
+            'max_drawdown', max_drawdowns[idx], min(max_drawdowns), max(max_drawdowns)
         )
-        normalized_consistency_score = normalize_metric(
-            consistency_scores[idx], min(consistency_scores), max(consistency_scores)
+        consistency_score = normalize_metric(
+            'consistency_score', consistency_scores[idx], min(consistency_scores), max(consistency_scores)
         )
         position_count_score = get_position_count_score(
-            len(miner['positions']), max_positions
+            len(miner['positions']), max(position_counts)
         )
-        experience_score = experience_scores[idx]
+        experience_score = experience_scores[idx]**2
 
-        # Weighted score calculation with adjusted weights
+        # # Weighted score calculation with adjusted weights
+        # total_score = (
+        #     0.20 * max_drawdown +  # Since lower drawdown is better
+        #     0.20 * thirty_day_returns +
+        #     0.15 * sharpe_ratio +
+        #     0.15 * consistency_score +
+        #     0.15 * profitability +
+        #     0.05 * experience_score +
+        #     0.05 * all_time_returns +
+        #     0.05 * position_count_score            
+        # )
+        
         total_score = (
-            0.30 * normalized_consistency_score +
-            0.20 * inverted_max_drawdown +  # Since lower drawdown is better
-            0.15 * normalized_thirty_day_returns +
-            0.10 * normalized_profitability +
-            0.10 * experience_score +
-            0.10 * normalized_sharpe_ratio +
-            0.05 * position_count_score            
+            all_time_returns
+            *
+            thirty_day_returns**5
+            *
+            profitability**3
+            *
+            sharpe_ratio**2
+            *
+            max_drawdown**4
+            *
+            consistency_score**3
+            *
+            position_count_score**2 
+            *
+            experience_score**3
         )
-
+        
         normalized_metrics.append({
             "hotkey": list(data.keys())[idx],
-            "total_score": total_score,
-            "normalized_profitability": normalized_profitability,
-            "normalized_thirty_day_returns": normalized_thirty_day_returns,
-            "inverted_max_drawdown": inverted_max_drawdown,
-            "experience_score": experience_score,
-            "normalized_consistency_score": normalized_consistency_score,
-            "normalized_sharpe_ratio": normalized_sharpe_ratio,
-            "position_count_score": position_count_score,
+            "total_score": float(total_score),
+            "profitability": float(profitability),
+            "thirty_day_returns": float(thirty_day_returns),
+            "all_time_returns": float(all_time_returns),
+            "max_drawdown": float(max_drawdown),
+            "experience_score": float(experience_score),
+            "consistency_score": float(consistency_score),
+            "sharpe_ratio": float(sharpe_ratio),
+            "position_count_score": float(position_count_score),
             "n_positions": len(miner['positions'])
         })
 
