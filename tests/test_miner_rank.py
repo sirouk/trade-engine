@@ -234,7 +234,7 @@ def calculate_miner_scores(data):
     # Rank miners by total score
     return sorted(normalized_metrics, key=lambda x: x["total_score"], reverse=True)
 
-async def get_ranked_signals(assets_to_trade = None):
+async def get_ranked_miners(assets_to_trade = None):
     credentials = load_bittensor_credentials()
     api_key = credentials.bittensor_sn8.api_key
     endpoint = credentials.bittensor_sn8.endpoint
@@ -254,4 +254,4 @@ async def get_ranked_signals(assets_to_trade = None):
 
 if __name__ == '__main__':
     assets_to_trade = ["BTCUSD", "ETHUSD"]  # Specify the assets you want to include
-    asyncio.run(get_ranked_signals(assets_to_trade))
+    asyncio.run(get_ranked_miners(assets_to_trade))
