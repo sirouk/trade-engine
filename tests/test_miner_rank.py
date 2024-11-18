@@ -211,10 +211,10 @@ def calculate_miner_scores(data):
 
             total_score = (
                 max_drawdown**5 +
-                thirty_day_returns**3 +
                 sharpe_ratio**3 +
-                percentage_profitable**2 +
+                thirty_day_returns**3 +
                 asset_returns**2 +
+                percentage_profitable**2 +
                 position_count_score**2 +
                 consistency_score**2
             )
@@ -223,10 +223,10 @@ def calculate_miner_scores(data):
             "hotkey": list(data.keys())[idx],
             "total_score": float(total_score),
             "max_drawdown": float(max_drawdown),
-            "thirty_day_returns": float(thirty_day_returns),
             "sharpe_ratio": float(sharpe_ratio),
-            "percentage_profitable": float(percentage_profitable),
+            "thirty_day_returns": float(thirty_day_returns),
             "asset_returns": float(asset_returns),
+            "percentage_profitable": float(percentage_profitable),
             "position_count_score": float(position_count_score),
             "consistency_score": float(consistency_score),
         })
