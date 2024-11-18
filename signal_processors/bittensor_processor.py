@@ -68,23 +68,32 @@ def process_signals(data, top_miners=None, mapped_only=True):
     # Initialize asset tracking dictionaries
     asset_depths = {}
     asset_prices = {}
+    miner_tracker = []  # Track miners that have been processed
 
     # Iterate through the ranked miners and apply gradient allocations
     for rank, (miner_hotkey, miner_positions) in enumerate(sorted_miners, start=1):
+        
+        # Skip if this asset has already been counted for this miner
+        if miner_hotkey in miner_tracker:
+            print(f"Skipping miner {miner_hotkey} as it has already been processed.")
+            continue
+        miner_tracker.append(miner_hotkey)  # Mark this asset as seen for this miner
+        
+        print(f"Processing miner {miner_hotkey} at rank {rank}")
+        
         allocation_weight = allocations[rank]
-        asset_tracker = set()  # Track assets seen for this miner to prevent overcounting
 
         for position_data in miner_positions.get('positions', []):
+            if position_data['net_leverage'] == 0:
+                #print(f"Skipping position with zero leverage for {miner_hotkey}")
+                continue
+            
             original_symbol = position_data['trade_pair'][0]
             if mapped_only and original_symbol not in CORE_ASSET_MAPPING:
+                #print(f"Skipping {original_symbol} as it is not mapped to a core asset.")
                 continue
             symbol = CORE_ASSET_MAPPING[original_symbol]
-
-            # Skip if this asset has already been counted for this miner
-            if symbol in asset_tracker:
-                continue
-            asset_tracker.add(symbol)  # Mark this asset as seen for this miner
-
+            
             # Calculate normalized depth based on capped leverage and allocation weight
             capped_leverage = min(position_data['net_leverage'], LEVERAGE_LIMIT_CRYPTO)
             normalized_depth = (capped_leverage / LEVERAGE_LIMIT_CRYPTO) * allocation_weight
@@ -97,6 +106,12 @@ def process_signals(data, top_miners=None, mapped_only=True):
             asset_depths[symbol] += normalized_depth
             asset_prices[symbol]["weighted_price_sum"] += position_data['average_entry_price'] * normalized_depth
             asset_prices[symbol]["total_depth"] += normalized_depth  # Sum of normalized depths for averaging
+            
+            # iterate position_data["orders"] and get the last entry date from the time that is formatted like 1730353768756
+            last_order = position_data["orders"][-1]
+            last_entry_date = datetime.fromtimestamp(last_order["processed_ms"] / 1000).strftime("%Y-%m-%d %H:%M:%S")            
+            
+            print(f"Miner {miner_hotkey} has {normalized_depth:.2%} depth in {symbol} at {position_data['average_entry_price']:.2f} last entry date: {last_entry_date}")
 
     # Prepare final results with capped depth and weighted average price
     results = []
@@ -134,7 +149,7 @@ async def fetch_bittensor_signal(top_miners=None):
 # Example standalone usage
 if __name__ == '__main__':
     # return signals and print them
-    signals = asyncio.run(fetch_bittensor_signal(top_miners=20))
+    signals = asyncio.run(fetch_bittensor_signal(top_miners=5))
     for signal in signals:
         print(signal)
     print(f"Total signals: {len(signals)}") 
