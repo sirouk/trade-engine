@@ -9,6 +9,43 @@ def filter_positions_by_assets(data, asset_list):
     """Filter positions to include only those with specified assets."""
     filtered_data = {}
     for miner, details in data.items():
+        
+        if details["thirty_day_returns"] <= 0:
+            continue
+        
+        if details["all_time_returns"] <= 0:
+            continue
+        
+        # count the number of profitable trades for assets that match our asset_list
+        profitable_trades = 0
+        total_trades = 0
+        asset_trades = {}
+        latest_trade = 0
+        for position in details["positions"]:
+            if position["trade_pair"][0] not in asset_list:
+                continue
+            
+            asset_trades[position["trade_pair"][0]] = asset_trades.get(position["trade_pair"][0], 0) + 1
+            
+            if position["is_closed_position"]:
+                return_at_close = position["return_at_close"] - 1
+                if return_at_close > 0:
+                    profitable_trades += 1
+                latest_trade = max(latest_trade, position["close_ms"])
+                total_trades += 1
+        
+        # if there are less than 20 trades for any asset in the asset_list, skip this miner
+        for asset in asset_list:
+            if asset_trades.get(asset, 0) < 20:
+                continue
+        
+        if total_trades == 0 or profitable_trades / total_trades <= 0.90:
+            continue
+        
+        # if the latest trade was more than 15 days ago, skip this miner
+        if latest_trade < datetime.now().timestamp() * 1000 - 15 * 24 * 60 * 60 * 1000:
+            continue
+        
         filtered_positions = [
             pos for pos in details["positions"]
             if pos["trade_pair"][0] in asset_list
@@ -234,23 +271,43 @@ def calculate_miner_scores(data):
     # Rank miners by total score
     return sorted(normalized_metrics, key=lambda x: x["total_score"], reverse=True)
 
-async def get_ranked_miners(assets_to_trade = None):
+async def get_ranked_miners(assets_to_trade=None):
+    """
+    Fetch ranked miners and display the results along with their ranks.
+    """
     credentials = load_bittensor_credentials()
     api_key = credentials.bittensor_sn8.api_key
     endpoint = credentials.bittensor_sn8.endpoint
 
     positions_data = await fetch_bittensor_signals(api_key, endpoint)
-    
+
+    rankings, ranked_miners = rank_miners(positions_data, assets_to_trade)
+
+    # Display the rankings and top miners
+    print("Miner Rankings:")
+    for hotkey, rank in rankings.items():
+        print(f"{rank}: {hotkey}")
+
+    print("\nTop Miners by Score:")
+    for miner in ranked_miners[:10]:
+        print(miner)
+
+def rank_miners(positions_data, assets_to_trade=None):
+    """
+    Rank miners by their total score and return a dictionary of hotkeys to ranks.
+    """
     # Filter by assets
     if assets_to_trade:
         positions_data = filter_positions_by_assets(positions_data, assets_to_trade)
     
+    # Calculate scores and sort miners
     ranked_miners = calculate_miner_scores(positions_data)
-    #print(ranked_miners)
 
-    # Display top miners by score
-    for miner in ranked_miners[:10]:
-        print(miner)
+    # Build a dictionary mapping hotkeys to ranks
+    rankings = {miner['hotkey']: rank + 1 for rank, miner in enumerate(ranked_miners)}
+
+    return rankings, ranked_miners  # Return both the ranking and detailed scores    
+
 
 if __name__ == '__main__':
     assets_to_trade = ["BTCUSD", "ETHUSD"]  # Specify the assets you want to include
