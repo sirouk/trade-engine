@@ -45,6 +45,8 @@ def load_recent_signals():
     
     # Convert each signal data to a SignalWeightSource with the appropriate asset mapping
     tradingview_signals = fetch_tradingview_signals()
+    print(tradingview_signals)
+    #quit()
     tradingview_source = SignalWeightSource(
         name="TradingView",
         data=tradingview_signals,
@@ -55,7 +57,7 @@ def load_recent_signals():
     # Fetch Bittensor signals and convert them to a SignalWeightSource
     bittensor_signals = asyncio.run(fetch_bittensor_signal(top_miners=999))
     print(bittensor_signals)
-    quit()
+    #quit()
     bittensor_source = SignalWeightSource(
         name="Bittensor SN8",
         data={
@@ -165,7 +167,7 @@ def save_config(asset_configs):
     print_summary(asset_configs)
     
     # Save configuration to file
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+    with open(CONFIG_FILE, 'w') as f:
         json.dump(config_data, f, indent=4)
     print(f"\nConfiguration saved to {CONFIG_FILE}")
     
