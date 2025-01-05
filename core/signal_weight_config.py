@@ -1,4 +1,3 @@
-import os
 import json
 import asyncio
 from dataclasses import dataclass, asdict
@@ -42,15 +41,21 @@ class SignalWeightSource:
 
 def load_recent_signals():
     """Fetch signals from each source and normalize them."""
-    tradingview_signals = fetch_tradingview_signals()
-    bittensor_signals = asyncio.run(fetch_bittensor_signal(top_miners=999))
-
+    result_signals = []
+    
     # Convert each signal data to a SignalWeightSource with the appropriate asset mapping
+    tradingview_signals = fetch_tradingview_signals()
     tradingview_source = SignalWeightSource(
         name="TradingView",
         data=tradingview_signals,
         core_asset_mapping=TRADINGVIEW_ASSET_MAPPING
     )
+    result_signals.append(tradingview_source)
+    
+    # Fetch Bittensor signals and convert them to a SignalWeightSource
+    bittensor_signals = asyncio.run(fetch_bittensor_signal(top_miners=999))
+    print(bittensor_signals)
+    quit()
     bittensor_source = SignalWeightSource(
         name="Bittensor SN8",
         data={
@@ -63,8 +68,9 @@ def load_recent_signals():
         },
         core_asset_mapping=BITTENSOR_ASSET_MAPPING
     )
+    result_signals.append(bittensor_source)
 
-    return [tradingview_source, bittensor_source]
+    return result_signals
 
 def prompt_for_weight(symbol, source, original_symbol, remaining_weight):
     """Prompt user to assign a weight for a given symbol and source."""
@@ -159,7 +165,7 @@ def save_config(asset_configs):
     print_summary(asset_configs)
     
     # Save configuration to file
-    with open(CONFIG_FILE, 'w') as f:
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config_data, f, indent=4)
     print(f"\nConfiguration saved to {CONFIG_FILE}")
     

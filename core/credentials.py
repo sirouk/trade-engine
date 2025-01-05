@@ -53,7 +53,7 @@ def load_credentials(file_path: str) -> Credentials:
             mexc=MEXCCredentials(api_key="", api_secret=""),
         )
 
-    with open(file_path, 'r') as f:
+    with open(file_path, 'r', encoding='utf-8') as f:
         data = ujson.load(f)
 
     bittensor_creds = data.get('bittensor_sn8', {})
@@ -96,7 +96,7 @@ def save_credentials(credentials: Credentials, file_path: str):
         'kucoin': credentials.kucoin.__dict__ if credentials.kucoin else None,
         'mexc': credentials.mexc.__dict__ if credentials.mexc else None,
     }
-    with open(file_path, 'w') as f:
+    with open(file_path, 'w', encoding='utf-8') as f:
         ujson.dump(data, f, indent=4)
 
 def prompt_for_changes(credentials_name: str, skip_prompt: bool = False) -> bool:

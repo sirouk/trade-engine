@@ -1,6 +1,7 @@
 import os
-import ujson as json
 from datetime import datetime, timedelta
+
+import ujson as json
 
 RAW_SIGNALS_DIR = "raw_signals/tradingview"
 
@@ -20,30 +21,30 @@ def get_recent_files(directory, days=7):
             recent_files.append(file_path)
     return recent_files
 
-def normalize_symbol(symbol):
+def normalize_symbol(signal_symbol):
     """Normalize the symbol based on the core asset mapping."""
-    return CORE_ASSET_MAPPING.get(symbol, symbol)
+    return CORE_ASSET_MAPPING.get(signal_symbol, signal_symbol)
 
 def parse_signal_file(file_path, symbol_dates):
     signals = {}
-    with open(file_path, 'r') as f:
+    with open(file_path, 'r', encoding='utf-8') as f:
         for line in f:
             # Parse the line that looks like: 2024-10-25 10:03:04.954132 { "symbol": "ETHUSDT", "direction": "flat", "action": "sell", "leverage": "", "size": "Exit @ 3.425", "priority": "high", "takeprofit": "0.00", "trailstop": "0.00" }
-            date, timestamp, data = line.split(" ", 2)
-            signal_data = json.loads(data)
-            symbol = signal_data.get("symbol")
-            if not symbol:
+            date, timestamp, signal_data = line.split(" ", 2)
+            signal_data = json.loads(signal_data)
+            signal_symbol = signal_data.get("symbol")
+            if not signal_symbol:
                 continue
 
             # Normalize the symbol to match core asset format
-            symbol = normalize_symbol(symbol)
+            signal_symbol = normalize_symbol(signal_symbol)
 
             # If the symbol has been seen before, check if the current signal is newer
             line_timestamp = datetime.strptime(f"{date} {timestamp}", "%Y-%m-%d %H:%M:%S.%f")
-            if symbol in symbol_dates and symbol_dates[symbol] > line_timestamp:
+            if signal_symbol in symbol_dates and symbol_dates[signal_symbol] > line_timestamp:
                 continue
             # Record the timestamp for the symbol
-            symbol_dates[symbol] = line_timestamp
+            symbol_dates[signal_symbol] = line_timestamp
 
             # Only update to latest direction per symbol
             direction = signal_data.get("direction")
@@ -53,7 +54,7 @@ def parse_signal_file(file_path, symbol_dates):
 
             # Calculate depth based on the "size" field
             depth = 0.0
-            if symbol in signals and direction == "flat":
+            if signal_symbol in signals and direction == "flat":
                 depth = 0.0
             elif "/" in signal_data["size"]:
                 numerator, denominator = signal_data["size"].split("/")
@@ -68,8 +69,8 @@ def parse_signal_file(file_path, symbol_dates):
                 print(f"Invalid price: {price}")
                 continue
 
-            signals[symbol] = {
-                "original_symbol": symbol,
+            signals[signal_symbol] = {
+                "original_symbol": signal_symbol,
                 "depth": depth,
                 "price": price,
                 "timestamp": line_timestamp,
