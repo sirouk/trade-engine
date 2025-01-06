@@ -3,8 +3,10 @@ import aiohttp
 import ujson
 import os
 from datetime import datetime
-from core.credentials import load_bittensor_credentials
+from config.credentials import load_bittensor_credentials
 from core.bittensor_signals import BTTSN8MinerSignal, BTTSN8Position, BTTSN8Order, BTTSN8TradePair
+
+SIGNAL_SOURCE = "Bittensor SN8"
 
 RAW_SIGNALS_DIR = "raw_signals/bittensor"
 

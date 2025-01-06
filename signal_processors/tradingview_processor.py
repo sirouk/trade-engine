@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 
 import ujson as json
 
+SIGNAL_SOURCE = "TradingView"
+
 RAW_SIGNALS_DIR = "raw_signals/tradingview"
 
 # Core asset mapping dictionary to normalize symbols to a standardized format
