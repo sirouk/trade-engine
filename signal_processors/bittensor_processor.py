@@ -6,7 +6,7 @@ from datetime import datetime
 from config.credentials import load_bittensor_credentials
 from core.bittensor_signals import BTTSN8MinerSignal, BTTSN8Position, BTTSN8Order, BTTSN8TradePair
 
-SIGNAL_SOURCE = "Bittensor SN8"
+SIGNAL_SOURCE = "bittensor"
 
 RAW_SIGNALS_DIR = "raw_signals/bittensor"
 
@@ -86,15 +86,14 @@ def process_signals(data, top_miners=None, mapped_only=True):
         allocation_weight = allocations[rank]
 
         for position_data in miner_positions.get('positions', []):
-            if position_data['net_leverage'] == 0:
-                #print(f"Skipping position with zero leverage for {miner_hotkey}")
-                continue
+            # if position_data['net_leverage'] == 0:
+            #     #print(f"Skipping position with zero leverage for {miner_hotkey}")
+            #     continue
             
-            original_symbol = position_data['trade_pair'][0]
-            if mapped_only and original_symbol not in CORE_ASSET_MAPPING:
-                #print(f"Skipping {original_symbol} as it is not mapped to a core asset.")
+            symbol = position_data['trade_pair'][0]
+            if mapped_only and symbol not in CORE_ASSET_MAPPING:
+                #print(f"Skipping {symbol} as it is not mapped to a core asset.")
                 continue
-            symbol = CORE_ASSET_MAPPING[original_symbol]
             
             # Calculate normalized depth based on capped leverage and allocation weight
             capped_leverage = min(position_data['net_leverage'], LEVERAGE_LIMIT_CRYPTO)
@@ -128,7 +127,9 @@ def process_signals(data, top_miners=None, mapped_only=True):
         )
         
         results.append({
-            "symbol": symbol,
+            "original_symbol": symbol,
+            "symbol": CORE_ASSET_MAPPING[symbol] or symbol,
+            # get the original symbol by reversing the mapping
             "depth": capped_depth,
             "average_price": weighted_average_price
         })
