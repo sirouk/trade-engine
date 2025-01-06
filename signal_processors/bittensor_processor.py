@@ -69,7 +69,6 @@ def process_signals(data, top_miners=None, mapped_only=True):
 
     # Initialize asset tracking dictionaries
     asset_depths = {}
-    asset_prices = {}
     miner_tracker = []  # Track miners that have been processed
 
     # Iterate through the ranked miners and apply gradient allocations
@@ -90,10 +89,11 @@ def process_signals(data, top_miners=None, mapped_only=True):
             #     #print(f"Skipping position with zero leverage for {miner_hotkey}")
             #     continue
             
-            symbol = position_data['trade_pair'][0]
-            if mapped_only and symbol not in CORE_ASSET_MAPPING:
-                #print(f"Skipping {symbol} as it is not mapped to a core asset.")
+            original_symbol = position_data['trade_pair'][0]
+            if mapped_only and original_symbol not in CORE_ASSET_MAPPING:
+                #print(f"Skipping {original_symbol} as it is not mapped to a core asset.")
                 continue
+            symbol = CORE_ASSET_MAPPING[original_symbol]
             
             # Calculate normalized depth based on capped leverage and allocation weight
             capped_leverage = min(position_data['net_leverage'], LEVERAGE_LIMIT_CRYPTO)
@@ -101,35 +101,36 @@ def process_signals(data, top_miners=None, mapped_only=True):
 
             # Update depth and leverage-weighted price for each asset
             if symbol not in asset_depths:
-                asset_depths[symbol] = 0.0
-                asset_prices[symbol] = {"weighted_price_sum": 0.0, "total_depth": 0.0}
+                asset_depths[symbol] = {"weighted_price_sum": 0.0, "total_depth": 0.0, "original_symbols": []}
             
-            asset_depths[symbol] += normalized_depth
-            asset_prices[symbol]["weighted_price_sum"] += position_data['average_entry_price'] * normalized_depth
-            asset_prices[symbol]["total_depth"] += normalized_depth  # Sum of normalized depths for averaging
+            asset_depths[symbol]["weighted_price_sum"] += position_data['average_entry_price'] * normalized_depth
+            asset_depths[symbol]["total_depth"] += normalized_depth  # Sum of normalized depths for averaging
             
             # iterate position_data["orders"] and get the last entry date from the time that is formatted like 1730353768756
             last_order = position_data["orders"][-1]
-            last_entry_date = datetime.fromtimestamp(last_order["processed_ms"] / 1000).strftime("%Y-%m-%d %H:%M:%S")            
+            last_entry_date = datetime.fromtimestamp(last_order["processed_ms"] / 1000).strftime("%Y-%m-%d %H:%M:%S")     
+            
+            # keep track of original symbols
+            if original_symbol not in asset_depths[symbol]['original_symbols']:
+                asset_depths[symbol]['original_symbols'].append(original_symbol)
             
             print(f"Miner {miner_hotkey} has {normalized_depth:.2%} depth in {symbol} at {position_data['average_entry_price']:.2f} last entry date: {last_entry_date}")
 
     # Prepare final results with capped depth and weighted average price
     results = []
-    for symbol, total_depth in asset_depths.items():
+    for symbol in asset_depths:
         capped_depth = min(total_depth, 1.0)  # Cap total depth at 1.0
-        total_depth_for_price = asset_prices[symbol]["total_depth"]
+        total_depth_for_price = asset_depths[symbol]["total_depth"]
         
         # Calculate weighted average price if total depth is positive
         weighted_average_price = (
-            asset_prices[symbol]["weighted_price_sum"] / total_depth_for_price 
+            asset_depths[symbol]["weighted_price_sum"] / total_depth_for_price 
             if total_depth_for_price > 0 else 0.0
         )
         
         results.append({
-            "original_symbol": symbol,
-            "symbol": CORE_ASSET_MAPPING[symbol] or symbol,
-            # get the original symbol by reversing the mapping
+            "symbol": symbol,
+            "original_symbols": asset_depths[symbol]['original_symbols'],
             "depth": capped_depth,
             "average_price": weighted_average_price
         })
