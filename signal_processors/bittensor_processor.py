@@ -55,6 +55,66 @@ def calculate_gradient_allocation(max_rank):
         allocations[rank] = inverted_rank / total_weight
     return allocations
 
+def compute_net_position_and_average_price(orders):
+    """
+    Given a list of orders, returns:
+      net_position, average_entry_price
+
+    Orders can have a positive or negative 'leverage' to represent
+    quantity (long vs. short). We assume:
+      +leverage => long
+      -leverage => short
+
+    This function:
+      1. Sorts orders by processed_ms (chronological).
+      2. Iterates through them, maintaining net position & cost basis
+         while accounting for partial/full offsets.
+      3. If an order is FLAT, we zero out net_position but keep the
+         current cost_basis.
+    """
+
+    # Sort chronologically:
+    sorted_orders = sorted(orders, key=lambda x: x["processed_ms"])
+
+    net_position = 0.0
+    cost_basis   = 0.0  # Weighted average cost of the net_position
+    
+    # if any orders are flat, we will return with zero net position and zero cost basis
+    if any(order["order_type"].upper().strip() == "FLAT" for order in sorted_orders):
+        print("Found FLAT order. Resetting net position and cost basis.")
+        return net_position, cost_basis
+
+    for order in sorted_orders:
+        # Skip zero-sized orders, but DO NOT skip FLAT orders anymore!
+        if abs(order["leverage"]) == 0:
+            continue
+
+        qty   = order["leverage"]
+        price = order["price"]
+
+        if net_position * qty > 0:
+            # Same direction => Weighted average
+            new_position = net_position + qty
+            cost_basis   = (net_position * cost_basis + qty * price) / new_position
+            net_position = new_position
+        else:
+            # Opposite direction => offset or flip
+            if abs(qty) > abs(net_position):
+                # Flip from net_position to leftover
+                leftover     = qty + net_position
+                net_position = leftover
+                cost_basis   = price  # brand-new position's cost basis
+            else:
+                # Partial or full close of existing position
+                net_position += qty
+                if abs(net_position) < 1e-15:
+                    # fully closed
+                    net_position = 0.0
+                    cost_basis   = 0.0  # or keep if you have a special reason not to reset
+
+    return net_position, cost_basis
+
+
 def process_signals(data, top_miners=None, mapped_only=True):
     if data is None:
         return []
@@ -69,71 +129,106 @@ def process_signals(data, top_miners=None, mapped_only=True):
 
     # Initialize asset tracking dictionaries
     asset_depths = {}
+    asset_entries = {}
     miner_tracker = []  # Track miners that have been processed
 
     # Iterate through the ranked miners and apply gradient allocations
     for rank, (miner_hotkey, miner_positions) in enumerate(sorted_miners, start=1):
-        
+
         # Skip if this asset has already been counted for this miner
         if miner_hotkey in miner_tracker:
             print(f"Skipping miner {miner_hotkey} as it has already been processed.")
             continue
+
         miner_tracker.append(miner_hotkey)  # Mark this asset as seen for this miner
-        
-        print(f"Processing miner {miner_hotkey} at rank {rank}")
-        
+        #print(f"Processing miner {miner_hotkey} at rank {rank}")
+
         allocation_weight = allocations[rank]
 
         for position_data in miner_positions.get('positions', []):
-            # if position_data['net_leverage'] == 0:
-            #     #print(f"Skipping position with zero leverage for {miner_hotkey}")
-            #     continue
-            
-            original_symbol = position_data['trade_pair'][0]
-            if mapped_only and original_symbol not in CORE_ASSET_MAPPING:
+
+            # iterate all trade pairs and get the original symbol which has a mapping in CORE_ASSET_MAPPING
+            original_symbol = next(
+                (
+                    trade_pair
+                    for trade_pair in position_data['trade_pair']
+                    if trade_pair in CORE_ASSET_MAPPING
+                ),
+                None,
+            )
+            if mapped_only and not original_symbol:
                 #print(f"Skipping {original_symbol} as it is not mapped to a core asset.")
                 continue
-            symbol = CORE_ASSET_MAPPING[original_symbol]
-            
-            # Calculate normalized depth based on capped leverage and allocation weight
-            capped_leverage = min(position_data['net_leverage'], LEVERAGE_LIMIT_CRYPTO)
-            normalized_depth = (capped_leverage / LEVERAGE_LIMIT_CRYPTO) * allocation_weight
 
-            # Update depth and leverage-weighted price for each asset
+            # Normalize the symbol to match core asset format
+            symbol = CORE_ASSET_MAPPING[original_symbol]
+
+            # add an entry for the symbol with the net from the miner
             if symbol not in asset_depths:
-                asset_depths[symbol] = {"weighted_price_sum": 0.0, "total_depth": 0.0, "original_symbols": []}
+                asset_depths[symbol] = []
             
-            asset_depths[symbol]["weighted_price_sum"] += position_data['average_entry_price'] * normalized_depth
-            asset_depths[symbol]["total_depth"] += normalized_depth  # Sum of normalized depths for averaging
+            # Skip if the position has no net leverage or is closed
+            if position_data["net_leverage"] == 0 or position_data["is_closed_position"]:
+               #print(f"Skipping {symbol} as it has no net leverage.")
+               continue
             
-            # iterate position_data["orders"] and get the last entry date from the time that is formatted like 1730353768756
-            last_order = position_data["orders"][-1]
-            last_entry_date = datetime.fromtimestamp(last_order["processed_ms"] / 1000).strftime("%Y-%m-%d %H:%M:%S")     
+            net_pos, avg_price = compute_net_position_and_average_price(position_data["orders"])
+                
+            capped_leverage = min(net_pos, LEVERAGE_LIMIT_CRYPTO)
+            normalized_depth = (capped_leverage / LEVERAGE_LIMIT_CRYPTO) * allocation_weight
             
-            # keep track of original symbols
-            if original_symbol not in asset_depths[symbol]['original_symbols']:
-                asset_depths[symbol]['original_symbols'].append(original_symbol)
+            latest_order_ms = max(order['processed_ms'] for order in position_data['orders'])
+            latest_order_tstamp = datetime.fromtimestamp(latest_order_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                
+            print(f"Miner {miner_hotkey} in {symbol} with {normalized_depth:.2%} depth of ${avg_price:.2f} at {latest_order_tstamp}")
             
-            print(f"Miner {miner_hotkey} has {normalized_depth:.2%} depth in {symbol} at {position_data['average_entry_price']:.2f} last entry date: {last_entry_date}")
+            # Add the net position to the total depth
+            for order in position_data["orders"]:                
+                asset_depths[symbol].append(
+                    {
+                        "order_type": order["order_type"],
+                        "leverage": order["leverage"] * allocation_weight,
+                        "price": order["price"],
+                        "processed_ms": order["processed_ms"],
+                        "original_symbol": original_symbol,
+                    }
+                )
+
 
     # Prepare final results with capped depth and weighted average price
     results = []
-    for symbol in asset_depths:
-        capped_depth = min(total_depth, 1.0)  # Cap total depth at 1.0
-        total_depth_for_price = asset_depths[symbol]["total_depth"]
-        
-        # Calculate weighted average price if total depth is positive
-        weighted_average_price = (
-            asset_depths[symbol]["weighted_price_sum"] / total_depth_for_price 
-            if total_depth_for_price > 0 else 0.0
+
+    for symbol, entries in asset_depths.items():
+        # Re-calculate net position and average price
+        net_pos, avg_price = compute_net_position_and_average_price(entries)
+
+        # Get the last entry date for the symbol
+        last_entry_ms = max(entry["processed_ms"] for entry in entries)
+        last_entry_date = datetime.fromtimestamp(last_entry_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Get the latest recorded price for the symbol using the last entry date
+        last_price = next(
+            (
+                entry["price"]
+                for entry in entries
+                if entry["processed_ms"] == last_entry_ms
+            ),
+            None,
         )
-        
-        results.append({
-            "symbol": symbol,
-            "original_symbols": asset_depths[symbol]['original_symbols'],
-            "depth": capped_depth,
-            "average_price": weighted_average_price
-        })
+
+        # get a unique list of original symbols
+        original_symbols = list({entry["original_symbol"] for entry in entries})
+
+        results.append(
+            {
+                "symbol": symbol,
+                "original_symbols": original_symbols,
+                "depth": net_pos,
+                "price": last_price,
+                "average_price": avg_price,
+                "timestamp": last_entry_date,
+            }
+        )
 
     return results
 
@@ -154,7 +249,6 @@ async def fetch_bittensor_signal(top_miners=None):
 if __name__ == '__main__':
     # return signals and print them
     signals = asyncio.run(fetch_bittensor_signal(top_miners=5))
-    for signal in signals:
-        print(signal)
     print(f"Total signals: {len(signals)}") 
+    print(signals)
     
