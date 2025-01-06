@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import ujson as json
 
-SIGNAL_SOURCE = "TradingView"
+SIGNAL_SOURCE = "tradingview"
 
 RAW_SIGNALS_DIR = "raw_signals/tradingview"
 
