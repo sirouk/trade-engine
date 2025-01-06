@@ -45,4 +45,4 @@ sample = "sample:main"
 
 
 [tool.setuptools]
-packages = ["core", "signal_processors"]
+packages = ["config", "core", "signal_processors"]
