@@ -37,6 +37,10 @@ dependencies = [
     "kucoin-futures-python @ git+https://github.com/sirouk/kucoin-futures-python-sdk",
     "pymexc @ git+https://github.com/sirouk/pymexc",
     "numpy",
+    "fastapi",
+    "uvicorn",
+    "urllib3",
+    "pyopenssl",
 ]
 
 
