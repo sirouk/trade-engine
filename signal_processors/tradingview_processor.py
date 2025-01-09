@@ -115,6 +115,5 @@ def fetch_tradingview_signals():
 # Test Function
 if __name__ == '__main__':
     signals = fetch_tradingview_signals()
-    print(f"Total signals: {len(signals)}")
-    for symbol, signal in signals.items():
-        print(f"{symbol}: {signal}")
+    print(f"Total signals: {len(signals)}") 
+    print(signals)
