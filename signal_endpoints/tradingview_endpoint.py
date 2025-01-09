@@ -116,7 +116,7 @@ async def tradingview_webhook(request: Request):
     # Store logs in a secure directory
     log_dir = Path("raw_signals", "tradingview")
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file_path = log_dir / f"requests_all_raw_{datetime.datetime.now().strftime('%Y-%m-%d')}.log"
+    log_file_path = log_dir / f"trade_requests_{datetime.datetime.now().strftime('%Y-%m-%d')}.log"
     with open(log_file_path, "a") as log_file:
         log_file.write(log_entry)
 
