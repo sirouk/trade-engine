@@ -458,12 +458,12 @@ async def main():
     
     
     # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
-    await bybit.reconcile_position(
-        symbol="BTCUSDT",   # Symbol to adjust
-        size=0,  # Desired position size (positive for long, negative for short, zero to close)
-        leverage=5,         # Desired leverage
-        margin_mode="isolated"  # Desired margin mode
-    )
+    #await bybit.reconcile_position(
+    #    symbol="BTCUSDT",   # Symbol to adjust
+    #    size=0,  # Desired position size (positive for long, negative for short, zero to close)
+    #    leverage=5,         # Desired leverage
+    #    margin_mode="isolated"  # Desired margin mode
+    #)
     
     # close_result = await bybit.close_position(symbol="BTCUSDT")
     # print(close_result)
@@ -474,6 +474,9 @@ async def main():
     #await bybit.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     #positions = await bybit.fetch_and_map_positions(symbol="BTCUSDT")
     #print(positions)
+    
+    # Test symbol formats
+    await bybit.test_symbol_formats()
     
     # End time
     end_time = datetime.datetime.now()

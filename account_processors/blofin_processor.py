@@ -392,12 +392,12 @@ async def main():
     # time.sleep(5)
 
     # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
-    await blofin.reconcile_position(
-        symbol="BTC-USDT",   # Symbol to adjust
-        size=0,  # Desired position size (positive for long, negative for short, zero to close)
-        leverage=5,         # Desired leverage
-        margin_mode="isolated"  # Desired margin mode
-    )
+    #await blofin.reconcile_position(
+    #    symbol="BTC-USDT",   # Symbol to adjust
+    #    size=0,  # Desired position size (positive for long, negative for short, zero to close)
+    #    leverage=5,         # Desired leverage
+    #    margin_mode="isolated"  # Desired margin mode
+    #)
         
     # close_result = await blofin.close_position(symbol="BTC-USDT")
     # print(close_result)
@@ -408,6 +408,9 @@ async def main():
     # #await blofin.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     # positions = await blofin.fetch_and_map_positions(symbol="BTC-USDT")
     # #print(positions)
+    
+    # Test symbol formats
+    await blofin.test_symbol_formats()
     
     # End time
     end_time = datetime.datetime.now()

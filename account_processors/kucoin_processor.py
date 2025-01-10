@@ -418,12 +418,12 @@ async def main():
     # time.sleep(5)  # Wait for a bit to ensure the order is processed
 
     # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
-    await kucoin.reconcile_position(
-        symbol="XBTUSDTM",   # Symbol to adjust
-        size=0,  # Desired position size (positive for long, negative for short, zero to close)
-        leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
-        margin_mode="isolated"  # Desired margin mode (position must be closed to adjust)
-    )
+    #await kucoin.reconcile_position(
+    #    symbol="XBTUSDTM",   # Symbol to adjust
+    #    size=0,  # Desired position size (positive for long, negative for short, zero to close)
+    #    leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
+    #    margin_mode="isolated"  # Desired margin mode (position must be closed to adjust)
+    #)
     
     # # Close the position
     # close_order = await kucoin.close_position(symbol="XBTUSDTM")
@@ -435,6 +435,9 @@ async def main():
     # #await kucoin.fetch_open_positions(symbol="XBTUSDTM")       # Fetch open positions
     # positions = await kucoin.fetch_and_map_positions(symbol="XBTUSDTM")
     # #print(positions)
+    
+    # Test symbol formats
+    await kucoin.test_symbol_formats()
     
     # End time
     end_time = datetime.datetime.now()

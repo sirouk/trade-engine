@@ -388,12 +388,12 @@ async def main():
     # time.sleep(5)  # Wait for a bit to ensure the order is processed
     
     # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
-    await mexc.reconcile_position(
-        symbol="BTC_USDT",   # Symbol to adjust
-        size=-0.001,  # Desired position size (positive for long, negative for short, zero to close)
-        leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
-        margin_mode="isolated"  # 1:isolated 2:cross
-    )    
+    #await mexc.reconcile_position(
+    #    symbol="BTC_USDT",   # Symbol to adjust
+    #    size=-0.001,  # Desired position size (positive for long, negative for short, zero to close)
+    #    leverage=3,         # Desired leverage (only applies to new positions and averaged for existing ones)
+    #    margin_mode="isolated"  # 1:isolated 2:cross
+    #)    
 
     # Close the position
     # close_order = await mexc.close_position(symbol="BTC_USDT")
@@ -406,9 +406,13 @@ async def main():
     # positions = await mexc.fetch_and_map_positions(symbol="BTC_USDT")
     # #print(positions)
     
+    # Test symbol formats
+    await mexc.test_symbol_formats()  # where exchange is the instance name (bybit, blofin, kucoin, mexc)
+    
     # End time
     end_time = datetime.datetime.now()
     print(f"Time taken: {end_time - start_time}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
