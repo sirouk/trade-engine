@@ -399,6 +399,34 @@ class ByBit:
         except Exception as e:
             print(f"Error reconciling position: {str(e)}")
 
+    async def test_symbol_formats(self):
+        """Test function to dump symbol information for mapping."""
+        try:
+            # Test common symbols
+            test_symbols = ["BTCUSDT", "ETHUSDT"]
+            
+            for symbol in test_symbols:
+                try:
+                    # Get instrument info
+                    instrument = self.bybit_client.get_instruments_info(
+                        category="linear",
+                        symbol=symbol
+                    )
+                    
+                    print(f"\nBybit Symbol Information for {symbol}:")
+                    print(f"Native Symbol Format: {symbol}")
+                    print(f"Full Response: {instrument}")
+                    
+                    # Try to fetch a ticker to verify symbol works
+                    ticker = await self.fetch_tickers(symbol)
+                    print(f"Ticker Test: {ticker}")
+                    
+                except Exception as e:
+                    print(f"Error testing {symbol}: {str(e)}")
+                    
+        except Exception as e:
+            print(f"Error in symbol format test: {str(e)}")
+
 
 async def main():   
     

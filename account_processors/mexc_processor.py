@@ -334,6 +334,31 @@ class MEXC:
         except Exception as e:
             print(f"Error reconciling position: {str(e)}")
 
+    async def test_symbol_formats(self):
+        """Test function to dump symbol information for mapping."""
+        try:
+            # Test common symbols
+            test_symbols = ["BTC_USDT", "ETH_USDT"]
+            
+            for symbol in test_symbols:
+                try:
+                    # Get contract details
+                    contract = self.futures_client.detail(symbol=symbol)
+                    
+                    print(f"\nMEXC Symbol Information for {symbol}:")
+                    print(f"Native Symbol Format: {symbol}")
+                    print(f"Full Response: {contract}")
+                    
+                    # Try to fetch a ticker to verify symbol works
+                    ticker = await self.fetch_tickers(symbol)
+                    print(f"Ticker Test: {ticker}")
+                    
+                except Exception as e:
+                    print(f"Error testing {symbol}: {str(e)}")
+                    
+        except Exception as e:
+            print(f"Error in symbol format test: {str(e)}")
+
 
 async def main():
     
