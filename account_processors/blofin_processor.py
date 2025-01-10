@@ -1,7 +1,7 @@
 import asyncio
 import datetime
 from blofin import BloFinClient # https://github.com/nomeida/blofin-python
-from core.credentials import load_blofin_credentials
+from config.credentials import load_blofin_credentials
 from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
