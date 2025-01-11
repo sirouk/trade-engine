@@ -3,7 +3,10 @@ from datetime import datetime
 import asyncio
 import numpy as np
 from math import sqrt, log1p, prod
-from signal_processors.bittensor_processor import BittensorProcessor, RAW_SIGNALS_DIR
+from signal_processors.bittensor_processor import BittensorProcessor
+import logging
+
+logger = logging.getLogger(__name__)
 
 def filter_positions_by_assets(data, asset_list):
     """Filter positions to include only those with specified assets."""
@@ -291,10 +294,13 @@ async def get_ranked_miners(assets_to_trade=None):
     """
     processor = BittensorProcessor(enabled=True)
     positions_data = await processor._fetch_raw_signals()
+    if positions_data is None:
+        logger.error("Failed to fetch miner data")
+        return None, None
     
     # establish the key count cache file path
     miner_count_cache_filename = "miner_count_cache.txt"
-    miner_count_cache_path = os.path.join(RAW_SIGNALS_DIR, miner_count_cache_filename)
+    miner_count_cache_path = os.path.join(BittensorProcessor.RAW_SIGNALS_DIR, miner_count_cache_filename)
     
     # fetch the previous key count
     previous_key_count = fetch_key_count(miner_count_cache_path)
@@ -336,4 +342,7 @@ def rank_miners(positions_data, assets_to_trade=None):
 
 if __name__ == '__main__':
     assets_to_trade = ["BTCUSD", "ETHUSD"]  # Specify the assets you want to include
-    asyncio.run(get_ranked_miners(assets_to_trade))
+    rankings, ranked_miners = asyncio.run(get_ranked_miners(assets_to_trade))
+    if rankings is None:
+        print("Failed to get rankings")
+        exit(1)
