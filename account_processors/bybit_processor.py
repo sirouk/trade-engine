@@ -35,7 +35,13 @@ class ByBit:
 
     async def fetch_balance(self, instrument="USDT"):
         try:
-            balance = self.bybit_client.get_wallet_balance(accountType="UNIFIED", settleCoin=self.SETTLE_COIN, coin=instrument)
+            balance = await execute_with_timeout(
+                self.bybit_client.get_wallet_balance,
+                timeout=5,
+                accountType="UNIFIED",
+                settleCoin=self.SETTLE_COIN,
+                coin=instrument
+            )
             # {'retCode': 0, 'retMsg': 'OK', 'result': {'list': [{'totalEquity': '0.10204189', 'accountIMRate': '0', 'totalMarginBalance': '0.09302213', 'totalInitialMargin': '0', 'accountType': 'UNIFIED', 'totalAvailableBalance': '0.09302213', 'accountMMRate': '0', 'totalPerpUPL': '0', 'totalWalletBalance': '0.09302213', 'accountLTV': '0', 'totalMaintenanceMargin': '0', 'coin': [{'availableToBorrow': '', 'bonus': '0', 'accruedInterest': '0', 'availableToWithdraw': '0.09304419', 'totalOrderIM': '0', 'equity': '0.09304419', 'totalPositionMM': '0', 'usdValue': '0.09302213', 'unrealisedPnl': '0', 'collateralSwitch': True, 'spotHedgingQty': '0', 'borrowAmount': '0.000000000000000000', 'totalPositionIM': '0', 'walletBalance': '0.09304419', 'cumRealisedPnl': '-10924.04925374', 'locked': '0', 'marginCollateral': True, 'coin': 'USDT'}]}]}, 'retExtInfo': {}, 'time': 1728795935267}
             
             # get coin balance available to trade
@@ -48,7 +54,12 @@ class ByBit:
     # fetch all open positions
     async def fetch_all_open_positions(self):
         try:
-            positions = self.bybit_client.get_positions(category="linear", settleCoin=self.SETTLE_COIN)
+            positions = await execute_with_timeout(
+                self.bybit_client.get_positions,
+                timeout=5,
+                category="linear",
+                settleCoin=self.SETTLE_COIN
+            )
             #print(f"All Open Positions: {positions}")
             return positions
         except Exception as e:
@@ -56,7 +67,12 @@ class ByBit:
 
     async def fetch_open_positions(self, symbol):
         try:
-            positions = self.bybit_client.get_positions(category="linear", settleCoin=self.SETTLE_COIN, symbol=symbol)
+            positions = await execute_with_timeout(
+                self.bybit_client.get_positions,
+                timeout=5,
+                category="linear",
+                symbol=symbol
+            )
             print(f"Open Positions: {positions}")
             return positions
         except Exception as e:
@@ -64,7 +80,13 @@ class ByBit:
 
     async def fetch_open_orders(self, symbol):
         try:
-            orders = self.bybit_client.get_open_orders(category="linear", settleCoin=self.SETTLE_COIN, symbol=symbol)
+            orders = await execute_with_timeout(
+                self.bybit_client.get_open_orders,
+                timeout=5,
+                category="linear",
+                settleCoin=self.SETTLE_COIN,
+                symbol=symbol
+            )
             print(f"Open Orders: {orders}")
             return orders
         except Exception as e:
@@ -72,7 +94,10 @@ class ByBit:
             
     async def get_account_margin_mode(self) -> str:
         """Fetch the account info to determine the margin mode for UTA2.0."""
-        results = self.bybit_client.get_account_info()
+        results = await execute_with_timeout(
+            self.bybit_client.get_account_info,
+            timeout=5
+        )
         account = results.get("result", {})
         if "marginMode" in account:
             bybit_margin_mode = account.get("marginMode")
@@ -82,7 +107,13 @@ class ByBit:
     async def fetch_and_map_positions(self, symbol: str, fetch_margin_mode: bool = False) -> list:
         """Fetch open positions from Bybit and convert them to UnifiedPosition objects."""
         try:
-            response = self.bybit_client.get_positions(category="linear", settleCoin=self.SETTLE_COIN, symbol=symbol)
+            response = await execute_with_timeout(
+                self.bybit_client.get_positions,
+                timeout=5,
+                category="linear",
+                settleCoin=self.SETTLE_COIN,
+                symbol=symbol
+            )
             # print(response)
             # quit()
             positions = response.get("result", {}).get("list", [])
@@ -135,7 +166,12 @@ class ByBit:
         
     async def fetch_tickers(self, symbol):
         try:
-            tickers = self.bybit_client.get_tickers(category="linear", symbol=symbol)
+            tickers = await execute_with_timeout(
+                self.bybit_client.get_tickers,
+                timeout=5,
+                category="linear",
+                symbol=symbol
+            )
             ticker_data = tickers["result"]["list"][0]  # Assuming the first entry is the relevant ticker
             
             print(f"Ticker: {ticker_data}")
@@ -152,7 +188,12 @@ class ByBit:
 
     async def get_symbol_details(self, symbol: str):
         """Fetch instrument details including tick size, lot size, min size, and contract value."""
-        instruments = self.bybit_client.get_instruments_info(category="linear", symbol=symbol)
+        instruments = await execute_with_timeout(
+            self.bybit_client.get_instruments_info,
+            timeout=5,
+            category="linear",
+            symbol=symbol,
+        )
 
         for instrument in instruments["result"]["list"]:
             if instrument["symbol"] == symbol:
@@ -228,14 +269,18 @@ class ByBit:
             
             # set leverage and margin mode    
             try:
-                self.bybit_client.set_margin_mode(
+                await execute_with_timeout(
+                    self.bybit_client.set_margin_mode,
+                    timeout=5,
                     setMarginMode=bybit_margin_mode,
                 )   
             except Exception as e:
                 print(f"Margin Mode unchanged: {str(e)}")
             
             try:     
-                self.bybit_client.set_leverage(
+                await execute_with_timeout(
+                    self.bybit_client.set_leverage,
+                    timeout=5,
                     symbol=symbol, 
                     category=category,                
                     buyLeverage=str(leverage), 
@@ -244,7 +289,9 @@ class ByBit:
             except Exception as e:
                 print(f"Leverage unchanged: {str(e)}")
             
-            order = self.bybit_client.place_order(
+            order = await execute_with_timeout(
+                self.bybit_client.place_order,
+                timeout=5,
                 category=category,
                 symbol=symbol,
                 side=side.capitalize(),
@@ -277,15 +324,19 @@ class ByBit:
             if adjust_margin_mode:
                 bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                 try:
-                    self.bybit_client.set_margin_mode(
-                        setMarginMode=bybit_margin_mode
+                    await execute_with_timeout(
+                        self.bybit_client.set_margin_mode,
+                        timeout=5,
+                        setMarginMode=bybit_margin_mode,
                     )
                 except Exception as e:
                     print(f"Margin Mode unchanged: {str(e)}")
             
             if adjust_leverage:
                 try:
-                    self.bybit_client.set_leverage(
+                    await execute_with_timeout(
+                        self.bybit_client.set_leverage,
+                        timeout=5,
                         symbol=symbol, 
                         category="linear", 
                         buyLeverage=str(leverage), 
@@ -376,14 +427,20 @@ class ByBit:
                     print(f"Adjusting margin mode to {margin_mode}.")
                     bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                     try:
-                        self.bybit_client.set_margin_mode(setMarginMode=bybit_margin_mode)
+                        await execute_with_timeout(
+                            self.bybit_client.set_margin_mode,
+                            timeout=5,
+                            setMarginMode=bybit_margin_mode,
+                        )
                     except Exception as e:
                         print(f"Failed to adjust margin mode: {str(e)}")
 
                 if current_leverage != leverage:
                     print(f"Adjusting leverage to {leverage}.")
                     try:
-                        self.bybit_client.set_leverage(
+                        await execute_with_timeout(
+                            self.bybit_client.set_leverage,
+                            timeout=5,
                             symbol=symbol,
                             category="linear",
                             buyLeverage=str(leverage),
@@ -433,9 +490,11 @@ class ByBit:
             for symbol in test_symbols:
                 try:
                     # Get instrument info
-                    instrument = self.bybit_client.get_instruments_info(
+                    instrument = await execute_with_timeout(
+                        self.bybit_client.get_instruments_info,
+                        timeout=5,
                         category="linear",
-                        symbol=symbol
+                        symbol=symbol,
                     )
                     
                     print(f"\nBybit Symbol Information for {symbol}:")

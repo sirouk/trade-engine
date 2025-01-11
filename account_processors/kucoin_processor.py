@@ -41,7 +41,11 @@ class KuCoin:
     async def fetch_balance(self, instrument="USDT"):
         """Fetch futures account balance."""
         try:
-            balance = self.user_client.get_account_overview(currency=instrument)
+            balance = await execute_with_timeout(
+                self.user_client.get_account_overview,
+                timeout=5,
+                currency=instrument
+            )
             # {'accountEquity': 0.58268157, 'unrealisedPNL': 0.0, 'marginBalance': 0.58268157, 'positionMargin': 0.0, 'orderMargin': 0.0, 'frozenFunds': 0.0, 'availableBalance': 0.58268157, 'currency': 'USDT'}
             
             # get coin balance available to trade
@@ -54,8 +58,10 @@ class KuCoin:
     # fetch all open positions
     async def fetch_all_open_positions(self):
         try:
-            positions = self.trade_client.get_all_position()
-            #print(f"All Open Positions: {positions}")
+            positions = await execute_with_timeout(
+                self.trade_client.get_all_position,
+                timeout=5
+            )
             return positions
         except Exception as e:
             print(f"Error fetching all open positions: {str(e)}")
@@ -63,7 +69,11 @@ class KuCoin:
     async def fetch_open_positions(self, symbol):
         """Fetch open futures positions."""
         try:
-            positions = self.trade_client.get_position_details(symbol=symbol)
+            positions = await execute_with_timeout(
+                self.trade_client.get_position_details,
+                timeout=5,
+                symbol=symbol
+            )
             print(f"Open Positions: {positions}")
             return positions
         except Exception as e:
@@ -72,7 +82,11 @@ class KuCoin:
     async def fetch_open_orders(self, symbol):
         """Fetch open futures orders."""
         try:
-            orders = self.trade_client.get_open_order_details(symbol=symbol)
+            orders = await execute_with_timeout(
+                self.trade_client.get_open_order_details,
+                timeout=5,
+                symbol=symbol
+            )
             print(f"Open Orders: {orders}")
             return orders
         except Exception as e:
@@ -81,7 +95,11 @@ class KuCoin:
     async def fetch_and_map_positions(self, symbol: str):
         """Fetch and map KuCoin positions to UnifiedPosition."""
         try:
-            positions = self.trade_client.get_position_details(symbol=symbol)
+            positions = await execute_with_timeout(
+                self.trade_client.get_position_details,
+                timeout=5,
+                symbol=symbol
+            )
 
             # Convert each position to UnifiedPosition
             unified_positions = [
@@ -205,7 +223,9 @@ class KuCoin:
             
             # set margin mode    
             try:
-                self.trade_client.modify_margin_mode(
+                await execute_with_timeout(
+                    self.trade_client.modify_margin_mode,
+                    timeout=5,
                     symbol=symbol,
                     marginMode=kucoin_margin_mode,
                 )
@@ -213,7 +233,9 @@ class KuCoin:
                 print(f"Margin Mode unchanged: {str(e)}")
             
             #create_limit_order(self, symbol, side, lever, size, price, clientOid='', **kwargs):
-            order_id = self.trade_client.create_limit_order(
+            order_id = await execute_with_timeout(
+                self.trade_client.create_limit_order,
+                timeout=5,
                 symbol=symbol,
                 side=side.lower(),
                 price=price,
@@ -245,7 +267,9 @@ class KuCoin:
             if adjust_margin_mode:
                 print(f"Adjusting account margin mode to {kucoin_margin_mode}.")
                 try:
-                    self.trade_client.modify_margin_mode(
+                    await execute_with_timeout(
+                        self.trade_client.modify_margin_mode,
+                        timeout=5,
                         symbol=symbol,
                         marginMode=kucoin_margin_mode,
                     )
@@ -387,7 +411,11 @@ class KuCoin:
             for symbol in test_symbols:
                 try:
                     # Get contract details
-                    contract = self.market_client.get_contract_detail(symbol)
+                    contract = await execute_with_timeout(
+                        self.market_client.get_contract_detail,
+                        timeout=5,
+                        symbol=symbol
+                    )
                     
                     print(f"\nKuCoin Symbol Information for {symbol}:")
                     print(f"Native Symbol Format: {symbol}")

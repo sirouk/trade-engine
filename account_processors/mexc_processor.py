@@ -32,8 +32,12 @@ class MEXC:
     async def fetch_balance(self, instrument="USDT"):
         """Fetch the futures account balance for a specific instrument."""
         try:
-            # Fetch the asset details for the given instrument
-            balance = self.futures_client.asset(currency=instrument)
+            async with asyncio.timeout(5):
+                balance = await execute_with_timeout(
+                    self.futures_client.asset,
+                    timeout=5,
+                    currency=instrument
+                )
 
             # Check if the API call was successful
             if not balance.get("success", False):
@@ -51,7 +55,11 @@ class MEXC:
     # fetch all open positions
     async def fetch_all_open_positions(self):
         try:
-            positions = self.futures_client.open_positions(symbol=None)
+            positions = await execute_with_timeout(
+                self.futures_client.open_positions,
+                timeout=5,
+                symbol=None
+            )
             #print(f"All Open Positions: {positions}")
             return positions
         except Exception as e:
@@ -60,16 +68,24 @@ class MEXC:
     async def fetch_open_positions(self, symbol):
         """Fetch open futures positions."""
         try:
-            response = self.futures_client.open_positions(symbol=symbol)
-            print(f"Open Positions: {response}")
-            return response.get("data", [])
+            positions = await execute_with_timeout(
+                self.futures_client.open_positions,
+                timeout=5,
+                symbol=symbol
+            )
+            print(f"Open Positions: {positions}")
+            return positions.get("data", [])
         except Exception as e:
             print(f"Error fetching open positions: {str(e)}")
 
     async def fetch_open_orders(self, symbol):
         """Fetch open futures orders."""
         try:
-            response = self.futures_client.open_orders(symbol=symbol)
+            response = await execute_with_timeout(
+                self.futures_client.open_orders,
+                timeout=5,
+                symbol=symbol
+            )
             print(f"Open Orders: {response}")
             return response.get("data", [])
         except Exception as e:
@@ -78,7 +94,11 @@ class MEXC:
     async def fetch_and_map_positions(self, symbol: str):
         """Fetch and map MEXC positions to UnifiedPosition."""
         try:
-            response = self.futures_client.open_positions(symbol=symbol)
+            response = await execute_with_timeout(
+                self.futures_client.open_positions,
+                timeout=5,
+                symbol=symbol
+            )
             positions = response.get("data", [])
 
             unified_positions = [
@@ -123,8 +143,12 @@ class MEXC:
         
     async def fetch_tickers(self, symbol):
         try:
-            response = self.futures_client.ticker(symbol=symbol)
-            ticker_data = response.get("data", {})
+            ticker = await execute_with_timeout(
+                self.futures_client.ticker,
+                timeout=5,
+                symbol=symbol
+            )
+            ticker_data = ticker.get("data", {})
             
             # Quantity traded in the last 24 hours
             amount24 = float(ticker_data.get("amount24", 0))
@@ -146,7 +170,11 @@ class MEXC:
         """Fetch instrument details including lot size, min size, tick size, and contract value."""
         try:
             # Fetch all contract details for the given symbol
-            response = self.futures_client.detail(symbol=symbol)
+            response = await execute_with_timeout(
+                self.futures_client.detail,
+                timeout=5,
+                symbol=symbol
+            )
 
             # Check if the API call was successful
             if not response.get("success", False):
@@ -216,7 +244,9 @@ class MEXC:
             print(f"Ordering {lots} lots @ {price}")
             #quit()
             
-            order = self.futures_client.order(
+            order = await execute_with_timeout(
+                self.futures_client.order,
+                timeout=5,
                 symbol=symbol,
                 price=price,
                 vol=lots,
@@ -309,7 +339,9 @@ class MEXC:
                     print(f"Adjusting account margin mode to {margin_mode}.")
                     mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                     try:
-                        self.trade_client.modify_margin_mode(
+                        await execute_with_timeout(
+                            self.trade_client.modify_margin_mode,
+                            timeout=5,
                             symbol=symbol,
                             marginMode=mexc_margin_mode,
                         )
@@ -359,7 +391,11 @@ class MEXC:
             for symbol in test_symbols:
                 try:
                     # Get contract details
-                    contract = self.futures_client.detail(symbol=symbol)
+                    contract = await execute_with_timeout(
+                        self.futures_client.detail,
+                        timeout=5,
+                        symbol=symbol
+                    )
                     
                     print(f"\nMEXC Symbol Information for {symbol}:")
                     print(f"Native Symbol Format: {symbol}")

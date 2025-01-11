@@ -31,8 +31,12 @@ class BloFin:
 
     async def fetch_balance(self, instrument="USDT"):
         try:
-            # Get futures balance
-            balance = self.blofin_client.account.get_balance(account_type="futures", currency=instrument)
+            balance = await execute_with_timeout(
+                self.blofin_client.account.get_balance,
+                timeout=5,
+                account_type="futures",
+                currency=instrument
+            )
             # {'code': '0', 'msg': 'success', 'data': [{'currency': 'USDT', 'balance': '0.000000000000000000', 'available': '0.000000000000000000', 'frozen': '0.000000000000000000', 'bonus': '0.000000000000000000'}]}
             
             # get coin balance available to trade
@@ -45,16 +49,21 @@ class BloFin:
     # fetch all open positions
     async def fetch_all_open_positions(self):
         try:
-            positions = self.blofin_client.trading.get_positions()
-            #print(f"All Open Positions: {positions}")
+            positions = await execute_with_timeout(
+                self.blofin_client.trading.get_positions,
+                timeout=5
+            )
             return positions
         except Exception as e:
             print(f"Error fetching all open positions: {str(e)}")
     
     async def fetch_open_positions(self, symbol):
         try:
-            # Get open positions for a specific instrument (example: BTC-USDT)
-            positions = self.blofin_client.trading.get_positions(inst_id=symbol)
+            positions = await execute_with_timeout(
+                self.blofin_client.trading.get_positions,
+                timeout=5,
+                inst_id=symbol
+            )
             print(f"Open Positions: {positions}")
             return positions
         except Exception as e:
@@ -62,8 +71,11 @@ class BloFin:
 
     async def fetch_open_orders(self, symbol):
         try:
-            # Get open orders for a specific instrument (example: BTC-USDT)
-            orders = self.blofin_client.trading.get_order_history(inst_id=symbol)
+            orders = await execute_with_timeout(
+                self.blofin_client.trading.get_orders,
+                timeout=5,
+                inst_id=symbol
+            )
             print(f"Open Orders: {orders}")
             return orders
         except Exception as e:
@@ -72,8 +84,11 @@ class BloFin:
     async def fetch_and_map_positions(self, symbol: str):
         """Fetch open positions from BloFin and convert them to UnifiedPosition objects."""
         try:
-            # Fetch positions filtered by symbol directly
-            response = self.blofin_client.trading.get_positions(inst_id=symbol)
+            response = await execute_with_timeout(
+                self.blofin_client.trading.get_positions,
+                timeout=5,
+                inst_id=symbol
+            )
             positions = response.get("data", [])
             #print(positions)
             #quit()
@@ -119,7 +134,11 @@ class BloFin:
         
     async def fetch_tickers(self, symbol):
         try:
-            tickers = self.blofin_client.public.get_tickers(inst_id=symbol)
+            tickers = await execute_with_timeout(
+                self.blofin_client.public.get_tickers,
+                timeout=5,
+                inst_id=symbol
+            )
             ticker_data = tickers["data"][0]  # Assuming the first entry is the relevant ticker
 
             print(f"Ticker: {ticker_data}")
@@ -134,19 +153,27 @@ class BloFin:
         except Exception as e:
             print(f"Error fetching tickers from Blofin: {str(e)}")
 
-    async def get_symbol_details(self, symbol):
+    async def get_symbol_details(self, symbol: str):
         """Fetch instrument details including tick size and lot size."""
-        instruments = self.blofin_client.public.get_instruments(inst_type="SWAP")
-        for instrument in instruments["data"]:
-            if instrument["instId"] == symbol:
-                #print(f"Symbol: {symbol} -> {instrument}")
-                lot_size = float(instrument["lotSize"])
-                min_size = float(instrument["minSize"])
-                tick_size = float(instrument["tickSize"])
-                contract_value = float(instrument["contractValue"])
-                
-                return lot_size, min_size, tick_size, contract_value
-        raise ValueError(f"Symbol {symbol} not found.")
+        try:
+            instruments = await execute_with_timeout(
+                self.blofin_client.public.get_instruments,
+                timeout=5,
+                inst_type="SWAP"
+            )
+            for instrument in instruments["data"]:
+                if instrument["instId"] == symbol:
+                    #print(f"Symbol: {symbol} -> {instrument}")
+                    lot_size = float(instrument["lotSize"])
+                    min_size = float(instrument["minSize"])
+                    tick_size = float(instrument["tickSize"])
+                    contract_value = float(instrument["contractValue"])
+                    
+                    return lot_size, min_size, tick_size, contract_value
+            raise ValueError(f"Symbol {symbol} not found.")
+        except Exception as e:
+            print(f"Error fetching symbol details: {str(e)}")
+            return None
 
     async def scale_size_and_price(self, symbol: str, size: float, price: float):
         """Scale size and price to match exchange requirements."""
@@ -195,7 +222,9 @@ class BloFin:
             print(f"Ordering {lots} lots @ {price}")
             #quit()
             
-            order = self.blofin_client.trading.place_order(
+            order = await execute_with_timeout(
+                self.blofin_client.trading.place_order,
+                timeout=5,
                 inst_id=symbol,
                 side=side.lower(),
                 position_side=position_side,
@@ -261,7 +290,9 @@ class BloFin:
 
             # Place a market order in the opposite direction to close the position
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            order = self.blofin_client.trading.place_order(
+            order = await execute_with_timeout(
+                self.blofin_client.trading.place_order,
+                timeout=5,
                 inst_id=symbol,
                 side=side.lower(),
                 position_side=position["positionSide"],  # Ensure the same position mode
@@ -276,7 +307,7 @@ class BloFin:
 
             print(f"Position Closed: {order}")
             return order
-
+            
         except Exception as e:
             print(f"Error closing position: {str(e)}")
             
@@ -316,7 +347,9 @@ class BloFin:
                 if current_leverage != leverage:
                     print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
                     try:
-                        self.blofin_client.trading.set_leverage(
+                        await execute_with_timeout(
+                            self.blofin_client.trading.set_leverage,
+                            timeout=5,
                             inst_id=symbol,
                             leverage=leverage,
                             margin_mode=margin_mode,
@@ -362,7 +395,11 @@ class BloFin:
             for symbol in test_symbols:
                 try:
                     # Get instrument info
-                    instrument = self.blofin_client.public.get_instruments(inst_type="SWAP")
+                    instrument = await execute_with_timeout(
+                        self.blofin_client.public.get_instruments,
+                        timeout=5,
+                        inst_type="SWAP"
+                    )
                     
                     print(f"\nBloFin Symbol Information for {symbol}:")
                     print(f"Native Symbol Format: {symbol}")
