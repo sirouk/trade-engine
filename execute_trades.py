@@ -88,14 +88,23 @@ class ExchangeLogger:
         self._log('warning', msg)
 
 class TradeExecutor:
-    def __init__(self):
-        # Load signal weight configuration
+    def _load_weight_config(self) -> bool:
+        """Load signal weight configuration from file. Returns True if successful."""
         try:
             with open('signal_weight_config.json', 'r') as f:
                 self.weight_config = json.load(f)
+            return True
         except FileNotFoundError:
             logger.error("signal_weight_config.json not found")
-            raise
+            return False
+        except json.JSONDecodeError:
+            logger.error("signal_weight_config.json is malformed")
+            return False
+
+    def __init__(self):
+        # Initial load of weight config
+        if not self._load_weight_config():
+            raise RuntimeError("Failed to load initial weight configuration")
 
         # Initialize processors with enabled state based on non-zero weights
         self.bittensor_processor = BittensorProcessor(
@@ -250,6 +259,10 @@ class TradeExecutor:
         """Execute trades based on signals."""
         with self.global_logger:  # Use global logger for main execution flow
             try:
+                # Reload weight configuration
+                if not self._load_weight_config():
+                    return False
+
                 signals = await self.get_signals()
                 
                 # Create tasks with prefixed logging
