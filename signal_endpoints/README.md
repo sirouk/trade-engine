@@ -35,7 +35,7 @@ python3 signal_endpoints/tradingview_endpoint.py tv-webhook.domain.com
 Then stop the endpoint and run it as a service:
 
 ```bash
-pm2 start signal_endpoints/tradingview_endpoint.py --name tradingview_endpoint --interpreter python3
+pm2 start signal_endpoints/tradingview_endpoint.py --name tradingview-endpoint --interpreter python3
 pm2 startup && pm2 save --force
 ```
 
