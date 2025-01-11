@@ -1,17 +1,17 @@
 import json
 import time
-from typing import Dict, List
+from typing import Dict
 import logging
 from datetime import datetime
+from collections import defaultdict
 
-from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING as TV_ASSET_MAPPING
-from signal_processors.bittensor_processor import fetch_bittensor_signal, CORE_ASSET_MAPPING as BT_ASSET_MAPPING
+from signal_processors.tradingview_processor import fetch_tradingview_signals
+from signal_processors.bittensor_processor import fetch_bittensor_signal
 from account_processors.bybit_processor import ByBit
 from account_processors.blofin_processor import BloFin
 from account_processors.kucoin_processor import KuCoin
 from account_processors.mexc_processor import MEXC
 
-# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -33,177 +33,106 @@ class TradeExecutor:
             with open('signal_weight_config.json', 'r') as f:
                 self.weight_config = json.load(f)
         except FileNotFoundError:
-            logger.error("signal_weight_config.json not found in root directory")
+            logger.error("signal_weight_config.json not found")
             raise
-        except json.JSONDecodeError:
-            logger.error("signal_weight_config.json contains invalid JSON")
-            raise
-        
-        # Create lookup dictionary for easier access
-        self.weight_lookup = {
-            item['symbol']: {
-                source['source']: {
-                    'weight': source['weight'],
-                    'leverage': item['leverage']
-                }
-                for source in item['sources']
-            }
-            for item in self.weight_config
-        }
 
-    async def get_signals(self):
-        """Fetch signals from all sources."""
+    async def get_signals(self) -> Dict:
+        """Fetch and combine signals from all sources."""
         try:
             tv_signals = fetch_tradingview_signals()
-            # Convert TV signals to dictionary if it's not already
-            tv_signals_dict = {}
-            if isinstance(tv_signals, list):
-                for signal in tv_signals:
-                    if isinstance(signal, dict):
-                        depth = signal.get('depth', 0.0)
-                        # Handle depth being a dictionary or direct value
-                        if isinstance(depth, dict):
-                            depth = depth.get('value', 0.0)
-                        elif isinstance(depth, (int, float)):
-                            depth = float(depth)
-                        tv_signals_dict[signal['symbol']] = depth
-            elif isinstance(tv_signals, dict):
-                # If signals are already a dict, extract depth values
-                for symbol, signal in tv_signals.items():
-                    if isinstance(signal, dict):
-                        depth = signal.get('depth', 0.0)
-                        if isinstance(depth, (int, float)):
-                            tv_signals_dict[symbol] = float(depth)
-                        elif isinstance(depth, dict):
-                            tv_signals_dict[symbol] = float(depth.get('value', 0.0))
-                    elif isinstance(signal, (int, float)):
-                        tv_signals_dict[symbol] = float(signal)
-            
             bt_signals = await fetch_bittensor_signal(top_miners=5)
-            # Convert BT signals to dictionary if it's not already
-            bt_signals_dict = {}
-            if isinstance(bt_signals, list):
-                for signal in bt_signals:
-                    if isinstance(signal, dict):
-                        depth = signal.get('depth', 0.0)
-                        if isinstance(depth, (int, float)):
-                            bt_signals_dict[signal['symbol']] = float(depth)
-                        elif isinstance(depth, dict):
-                            bt_signals_dict[signal['symbol']] = float(depth.get('value', 0.0))
-            elif isinstance(bt_signals, dict):
-                for symbol, signal in bt_signals.items():
-                    if isinstance(signal, dict):
-                        depth = signal.get('depth', 0.0)
-                        if isinstance(depth, (int, float)):
-                            bt_signals_dict[symbol] = float(depth)
-                        elif isinstance(depth, dict):
-                            bt_signals_dict[symbol] = float(depth.get('value', 0.0))
-                    elif isinstance(signal, (int, float)):
-                        bt_signals_dict[symbol] = float(signal)
             
-            # Fixed logging statements to show correct signal sources
-            logger.info("Raw signals:")
-            logger.info(f"  TradingView: {tv_signals}")
-            logger.info(f"  Bittensor: {bt_signals}")
-            logger.info("Processed signals:")
-            logger.info(f"  TradingView: {tv_signals_dict}")
-            logger.info(f"  Bittensor: {bt_signals_dict}")
+            logger.info(f"TradingView signals: {tv_signals}")
+            logger.info(f"Bittensor signals: {bt_signals}")
             
-            return tv_signals_dict, bt_signals_dict
+            # Combine signals using weights from config
+            combined_signals = {}
+            
+            for symbol_config in self.weight_config:
+                try:
+                    symbol = symbol_config['symbol']
+                    tv_weight = next((s['weight'] for s in symbol_config['sources'] 
+                                if s['source'] == 'tradingview'), 0)
+                    bt_weight = next((s['weight'] for s in symbol_config['sources'] 
+                                if s['source'] == 'bittensor'), 0)
+                    
+                    # Extract depth from TradingView signal structure
+                    tv_depth = float(tv_signals.get(symbol, {}).get('depth', 0)) if isinstance(tv_signals.get(symbol), dict) else 0
+                    bt_depth = 0  # Temporarily set to 0 while bittensor is not working
+                    
+                    total_weight = tv_weight + bt_weight
+                    if total_weight > 0:
+                        weighted_depth = ((tv_depth * tv_weight) + (bt_depth * bt_weight)) / total_weight
+                        combined_signals[symbol] = weighted_depth
+                        logger.info(f"Processed {symbol}: TV depth={tv_depth}, TV weight={tv_weight}, "
+                                  f"Combined depth={weighted_depth}")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing signal for {symbol}: {str(e)}")
+                    continue
+            
+            logger.info(f"Combined signals: {combined_signals}")
+            return combined_signals
             
         except Exception as e:
             logger.error(f"Error fetching signals: {str(e)}")
-            return {}, {}
+            return {}
 
-    def get_weighted_signal(self, symbol: str, tv_signal: float, bt_signal: float) -> float:
-        """Combine signals using configured weights"""
-        config = self.weight_lookup.get(symbol, {})
-        
-        total_signal = 0
-        total_weight = 0
-        
-        try:
-            # Process TradingView signal
-            if 'tradingview' in config:
-                # Handle signal being either float or dict
-                tv_value = (float(tv_signal['depth']) if isinstance(tv_signal, dict) 
-                          else float(tv_signal) if tv_signal is not None 
-                          else 0.0)
-                weight = float(config['tradingview']['weight'])
-                total_signal += tv_value * weight
-                total_weight += weight
-            
-            # Process Bittensor signal
-            if 'bittensor' in config:
-                # Handle signal being either float or dict
-                bt_value = (float(bt_signal['depth']) if isinstance(bt_signal, dict)
-                          else float(bt_signal) if bt_signal is not None
-                          else 0.0)
-                weight = float(config['bittensor']['weight'])
-                total_signal += bt_value * weight
-                total_weight += weight
-            
-        except (TypeError, ValueError, KeyError) as e:
-            logger.error(f"Error processing signals for {symbol}: {str(e)}")
-            return 0.0
-            
-        # Normalize if we have any valid signals
-        return total_signal / total_weight if total_weight > 0 else 0.0
-
-    def calculate_position_size(self, signal: float, balance: float, leverage: int) -> float:
-        """Calculate position size based on signal strength and account balance."""
-        # Signal is between -1 and 1, representing percentage of account to use
-        account_portion = abs(signal)
-        position_size = balance * account_portion * leverage
-        
-        # Preserve the direction from the signal
-        if signal < 0:
-            position_size = -position_size
-            
-        return position_size
-
-    async def process_account(self, account, tv_signals: Dict, bt_signals: Dict):
+    async def process_account(self, account, signals: Dict):
         """Process signals for a specific account."""
         try:
-            # Get account balance
-            balance = await account.fetch_balance()
-            if not balance:
-                logger.warning(f"No balance found for {account.exchange_name}")
-                return False, "No balance found"
+            # Get total account value (including positions)
+            total_value = await account.fetch_total_account_value()
+            if not total_value:
+                logger.warning(f"No account value found for {account.exchange_name}")
+                return False, "No account value found"
 
-            logger.info(f"Processing {account.exchange_name} with balance: {balance}")
+            logger.info(f"Processing {account.exchange_name} with total value: {total_value}")
 
-            # Process each symbol in the weight config
             for symbol_config in self.weight_config:
-                signal_symbol = symbol_config['symbol']  # e.g., "BTCUSDT"
+                signal_symbol = symbol_config['symbol']
+                depth = signals.get(signal_symbol, 0)
                 
-                # Map the signal symbol to exchange-specific format
-                exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
-                logger.info(f"Processing {signal_symbol} (Exchange format: {exchange_symbol})")
-
-                # Get signals for this symbol
-                tv_signal = tv_signals.get(signal_symbol, 0)
-                bt_signal = bt_signals.get(signal_symbol, 0)
-
-                # Calculate weighted signal
-                weighted_signal = self.get_weighted_signal(signal_symbol, tv_signal, bt_signal)
-                logger.info(f"Weighted signal for {signal_symbol}: {weighted_signal}")
-
-                if weighted_signal == 0:
-                    logger.info(f"No significant signal for {signal_symbol}, skipping")
+                if abs(depth) < 0.01:  # Ignore very small signals
                     continue
 
-                # Calculate position size based on balance and leverage
-                leverage = symbol_config.get('leverage', 1)
-                size = self.calculate_position_size(weighted_signal, balance, leverage)
-                logger.info(f"Calculated size: {size}")
+                # Map to exchange symbol format
+                exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
+                
+                # Get current market price
+                ticker = await account.fetch_tickers(exchange_symbol)
+                if not ticker:
+                    logger.error(f"Could not get price for {exchange_symbol}")
+                    continue
+                
+                price = ticker.last  # Use last price from ticker
 
-                # Reconcile position
+                # Calculate position value in USDT
+                position_value = total_value * depth
+                
+                # Calculate raw quantity
+                quantity = abs(position_value) / price
+                if depth < 0:
+                    quantity = -quantity
+
+                # Get symbol details to log the precision/lot requirements
+                symbol_details = await account.get_symbol_details(exchange_symbol)
+                lot_size, min_size, tick_size, contract_value = symbol_details  # Unpack the tuple
+                
+                logger.info(f"{exchange_symbol}: depth={depth}, "
+                          f"position_value={position_value}, raw_quantity={quantity}")
+                logger.info(f"Symbol {exchange_symbol} -> "
+                          f"Lot Size: {lot_size}, "
+                          f"Min Size: {min_size}, "
+                          f"Tick Size: {tick_size}, "
+                          f"Contract Value: {contract_value}")
+
+                # Let reconcile_position handle the quantity precision
                 await account.reconcile_position(
                     symbol=exchange_symbol,
-                    size=size,
-                    leverage=leverage,
-                    margin_mode="isolated"  # Default to isolated margin
+                    size=quantity,  # Pass raw quantity, let exchange-specific logic handle precision
+                    leverage=symbol_config.get('leverage', 1),
+                    margin_mode="isolated"
                 )
 
             return True, None
@@ -214,33 +143,130 @@ class TradeExecutor:
             return False, error_msg
 
     async def execute(self):
-        """Main execution loop"""
+        """Execute trades based on signals."""
         try:
-            # Get latest signals
-            tv_signals, bt_signals = await self.get_signals()
+            # Get signals
+            signals = await self.get_signals()
             
-            results = []
+            # Create a set of all symbols from config
+            configured_symbols = {config['symbol'] for config in self.weight_config}
+            
+            # Ensure all configured symbols have a signal (default to 0)
+            for symbol in configured_symbols:
+                if symbol not in signals:
+                    signals[symbol] = 0.0
+                    logger.info(f"No signal for {symbol}, defaulting to 0.0")
+            
+            # Process each account
             for account in self.accounts:
-                logger.info(f"\n{'='*50}\nProcessing {account.exchange_name} account\n{'='*50}")
-                success, error = await self.process_account(account, tv_signals, bt_signals)
-                results.append((account.exchange_name, success, error))
+                logger.info(f"\nProcessing {account.exchange_name} account")
+                success, error = await self.process_account(account, signals)
+                if not success:
+                    logger.error(f"{account.exchange_name}: Failed: {error}")
+                
+            logger.info("\nExecution Summary")
+            return True
             
-            # Log summary
-            logger.info("\n" + "="*50 + "\nExecution Summary\n" + "="*50)
-            
-            successful = [name for name, success, _ in results if success]
-            failed = [(name, error) for name, success, error in results if not success]
-            
-            if successful:
-                logger.info(f"Successfully processed accounts: {', '.join(successful)}")
-            if failed:
-                logger.warning("Failed accounts:")
-                for name, error in failed:
-                    logger.warning(f"  {name}: {error}")
-                    
         except Exception as e:
-            logger.error(f"Critical error during execution: {str(e)}")
-            raise
+            logger.error(f"Error in execution: {str(e)}")
+            return False
+
+async def calculate_trade_amounts(accounts, signals):
+    """Calculate trade amounts based on account values and signal weights."""
+    try:
+        # Get total account values using new methods
+        account_values = {}
+        for account in accounts:
+            total_value = await account.fetch_total_account_value()
+            account_values[account.exchange_name] = total_value
+            
+        print("\nAccount Values:")
+        for exchange, value in account_values.items():
+            print(f"{exchange}: {value:.2f} USDT")
+            
+        # Calculate aggregate depths and leverages by asset
+        asset_depths = defaultdict(float)
+        asset_leverages = defaultdict(list)
+        
+        for signal in signals:
+            symbol = signal.symbol
+            base_asset = symbol.replace("USDT", "")
+            depth = signal.weight * 100  # Convert weight to percentage
+            leverage = signal.leverage
+            
+            asset_depths[base_asset] += depth
+            if leverage not in asset_leverages[base_asset]:
+                asset_leverages[base_asset].append(leverage)
+                
+        # Print summary of depths and leverages
+        print("\nExpected Position Summary:")
+        for asset, depth in asset_depths.items():
+            print(f"\n{asset}:")
+            print(f"  Total Depth: {depth:.1f}%")
+            print(f"  Leverage(s): {asset_leverages[asset]}")
+
+        # Calculate trade amounts for each account and signal
+        trade_amounts = {}
+        for account in accounts:
+            exchange_value = account_values[account.exchange_name]
+            signal_amounts = {}
+            
+            for signal in signals:
+                # Calculate amount based on account value and signal weight
+                amount = exchange_value * signal.weight
+                signal_amounts[signal.symbol] = amount
+                
+            trade_amounts[account.exchange_name] = signal_amounts
+            
+        return trade_amounts
+        
+    except Exception as e:
+        print(f"Error calculating trade amounts: {str(e)}")
+        return None
+
+async def execute_trades(accounts, signals):
+    """Execute trades across all accounts based on signals."""
+    try:
+        # Calculate trade amounts
+        trade_amounts = await calculate_trade_amounts(accounts, signals)
+        if not trade_amounts:
+            return False
+            
+        print("\nTrade Execution Plan:")
+        for exchange, amounts in trade_amounts.items():
+            print(f"\n{exchange}:")
+            for symbol, amount in amounts.items():
+                print(f"  {symbol}: {amount:.2f} USDT")
+        
+        # Execute trades for each account
+        for account in accounts:
+            exchange_amounts = trade_amounts[account.exchange_name]
+            
+            for signal in signals:
+                amount = exchange_amounts[signal.symbol]
+                
+                # Skip if amount is too small
+                if amount < 5:  # Minimum trade size
+                    print(f"Skipping {signal.symbol} on {account.exchange_name} - amount too small: {amount:.2f} USDT")
+                    continue
+                    
+                try:
+                    # Reconcile position with calculated amount
+                    await account.reconcile_position(
+                        symbol=signal.symbol,
+                        size=signal.size,
+                        leverage=signal.leverage,
+                        margin_mode=signal.margin_mode
+                    )
+                except Exception as e:
+                    print(f"Error executing trade on {account.exchange_name} for {signal.symbol}: {str(e)}")
+                    continue
+                    
+        return True
+        
+    except Exception as e:
+        print(f"Error executing trades: {str(e)}")
+        return False
 
 async def main():
     executor = TradeExecutor()
