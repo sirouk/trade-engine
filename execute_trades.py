@@ -150,292 +150,68 @@ class TradeExecutor:
         # Normalize if we have any valid signals
         return total_signal / total_weight if total_weight > 0 else 0.0
 
-    def calculate_position_size(self, balance: float, price: float, signal: float, 
-                              symbol: str) -> float:
-        """Calculate the position size based on signal and configuration"""
-        try:
-            # Find symbol config
-            symbol_config = next(
-                (item for item in self.weight_config if item['symbol'] == symbol),
-                None
-            )
-            
-            if not symbol_config:
-                logger.warning(f"No configuration found for symbol {symbol}")
-                return 0.0
-                
-            # Get leverage directly from symbol config
-            leverage = float(symbol_config['leverage'])
-            
-            # Calculate total weight from all sources for this symbol
-            total_weight = sum(
-                source['weight'] for source in symbol_config['sources']
-            )
-            
-            # Calculate position size
-            position_value = balance * total_weight * leverage
-            position_size = (position_value / price) * signal
-            
-            return position_size
-            
-        except (TypeError, ValueError, KeyError) as e:
-            logger.error(f"Error calculating position size for {symbol}: {str(e)}")
-            return 0.0
-
-    async def process_account(self, account, tv_signals, bt_signals):
-        """Process a single account"""
-        try:
-            # Fetch balance and ensure it's a float
-            balance = await account.fetch_balance()
-            try:
-                balance = float(balance) if balance is not None else 0
-            except (ValueError, TypeError):
-                logger.warning(f"{account.exchange_name}: Could not convert balance to float: {balance}")
-                return False, "Invalid balance format"
-
-            if balance <= 0:
-                logger.warning(f"{account.exchange_name}: Invalid balance: {balance}")
-                return False, "Invalid balance"
-            
-            logger.info(f"{account.exchange_name}: Successfully fetched balance: {balance}")
-            
-            success = True
-            # Process each symbol
-            for symbol in self.weight_lookup:
-                try:
-                    # Get exchange-specific symbol format
-                    exchange_symbol = self.get_exchange_symbol(symbol, account.exchange_name)
-                    if exchange_symbol is None:
-                        logger.warning(f"{account.exchange_name}: Unsupported symbol {symbol}")
-                        continue
-                    
-                    # Fetch ticker with retry
-                    price = await self.get_ticker_price(account, exchange_symbol)
-                    if not price:
-                        logger.warning(f"{account.exchange_name}: Could not fetch valid ticker for {symbol}")
-                        success = False
-                        continue
-
-                    logger.info(f"{account.exchange_name}: {symbol} current price: {price}")
-                    
-                    # Get signals - handle both dict and float formats
-                    tv_signal = tv_signals.get(symbol)
-                    bt_signal = bt_signals.get(symbol)
-                    
-                    weighted_signal = self.get_weighted_signal(symbol, tv_signal, bt_signal)
-                    
-                    if weighted_signal == 0:
-                        logger.info(f"{account.exchange_name}: No valid signals for {symbol}, skipping")
-                        continue
-                    
-                    target_size = self.calculate_position_size(
-                        balance, price, weighted_signal, symbol
-                    )
-                    
-                    # Round the target size according to exchange rules
-                    target_size = self.round_size_to_exchange_rules(
-                        account, exchange_symbol, target_size
-                    )
-                    
-                    if target_size is None:
-                        logger.warning(f"{account.exchange_name}: Invalid target size for {symbol}")
-                        continue
-                    
-                    logger.info(
-                        f"{account.exchange_name}: {symbol} - "
-                        f"Signal: {weighted_signal:.4f}, Target Size: {target_size:.6f}"
-                    )
-                    
-                    if abs(target_size) > 0:
-                        try:
-                            # Get leverage directly from symbol config
-                            symbol_config = next(
-                                (item for item in self.weight_config if item['symbol'] == symbol),
-                                None
-                            )
-                            if not symbol_config:
-                                raise ValueError(f"No configuration found for {symbol}")
-                                
-                            leverage = symbol_config['leverage']
-                            
-                            await account.reconcile_position(
-                                symbol=exchange_symbol,
-                                size=target_size,
-                                leverage=leverage,
-                                margin_mode="isolated"
-                            )
-                            logger.info(f"{account.exchange_name}: Position reconciled for {symbol}")
-                        except Exception as e:
-                            logger.error(f"{account.exchange_name}: Error reconciling position for {symbol}: {str(e)}")
-                            success = False
-                    
-                except Exception as e:
-                    logger.error(f"{account.exchange_name}: Error processing {symbol} - {str(e)}")
-                    success = False
-                
-                time.sleep(1)
-            
-            return success, None
-            
-        except Exception as e:
-            return False, str(e)
-
-    def get_exchange_symbol(self, symbol: str, exchange: str) -> str | None:
-        """
-        Convert standard symbol to exchange-specific format.
-        Returns None if the symbol is not supported for the given exchange.
-        """
-        try:
-            # Validate input
-            if not symbol or not exchange:
-                logger.warning(f"Invalid input - symbol: {symbol}, exchange: {exchange}")
-                return None
-
-            # Standardize inputs
-            symbol = symbol.upper()
-            exchange = exchange.upper()
-
-            # Define exchange-specific symbol mappings
-            exchange_mappings = {
-                'MEXC': {
-                    'BTCUSDT': 'BTC_USDT',
-                    'ETHUSDT': 'ETH_USDT',
-                    # Add other supported pairs as needed
-                },
-                'KUCOIN': {
-                    'BTCUSDT': 'BTC-USDT',
-                    'ETHUSDT': 'ETH-USDT',
-                    # Add other supported pairs as needed
-                },
-                'BLOFIN': {
-                    'BTCUSDT': 'btcusdt',
-                    'ETHUSDT': 'ethusdt',
-                    # Add other supported pairs as needed
-                },
-                'BYBIT': {
-                    'BTCUSDT': 'BTCUSDT',
-                    'ETHUSDT': 'ETHUSDT',
-                    # Add other supported pairs as needed
-                }
-            }
-
-            # Check if exchange is supported
-            if exchange not in exchange_mappings:
-                logger.warning(f"Unsupported exchange: {exchange}")
-                return None
-
-            # Check if symbol is supported for this exchange
-            if symbol not in exchange_mappings[exchange]:
-                logger.warning(f"Unsupported symbol {symbol} for exchange {exchange}")
-                return None
-
-            converted_symbol = exchange_mappings[exchange][symbol]
-            logger.debug(f"Converted {symbol} to {converted_symbol} for {exchange}")
-            return converted_symbol
-
-        except Exception as e:
-            logger.error(f"Error converting symbol {symbol} for exchange {exchange}: {str(e)}")
-            return None
-
-    async def get_ticker_price(self, account, symbol: str) -> float:
-        """Fetch ticker price with retries and proper error handling"""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                tickers = await account.fetch_tickers(symbol=symbol)
-                
-                # Handle different ticker response formats
-                if hasattr(tickers, 'last') and tickers.last:
-                    return float(tickers.last)
-                elif isinstance(tickers, dict):
-                    # MEXC format
-                    if account.exchange_name == 'MEXC' and 'lastPrice' in tickers:
-                        return float(tickers['lastPrice'])
-                    # ByBit format
-                    elif 'lastPrice' in tickers:
-                        return float(tickers['lastPrice'])
-                    # KuCoin format
-                    elif 'price' in tickers:
-                        return float(tickers['price'])
-                    # Other exchange formats
-                    elif symbol in tickers and isinstance(tickers[symbol], dict):
-                        for price_key in ['last', 'lastPrice', 'price']:
-                            if price_key in tickers[symbol]:
-                                return float(tickers[symbol][price_key])
-                    
-                logger.warning(f"{account.exchange_name}: Invalid ticker format for {symbol}: {tickers}")
-                
-            except Exception as e:
-                logger.warning(f"Error fetching tickers from {account.exchange_name}: {str(e)}")
-                if attempt == max_retries - 1:
-                    break
-                time.sleep(1)
+    def calculate_position_size(self, signal: float, balance: float, leverage: int) -> float:
+        """Calculate position size based on signal strength and account balance."""
+        # Signal is between -1 and 1, representing percentage of account to use
+        account_portion = abs(signal)
+        position_size = balance * account_portion * leverage
         
-        return None
+        # Preserve the direction from the signal
+        if signal < 0:
+            position_size = -position_size
+            
+        return position_size
 
-    def round_size_to_exchange_rules(self, account, symbol: str, size: float) -> float:
-        """Round size according to exchange-specific rules"""
+    async def process_account(self, account, tv_signals: Dict, bt_signals: Dict):
+        """Process signals for a specific account."""
         try:
-            # Get exchange-specific lot size and minimum size
-            if account.exchange_name == 'ByBit':
-                if symbol == 'BTCUSDT':
-                    lot_size = 0.001
-                    min_size = 0.001
-                    max_size = 100.0
-                else:  # ETHUSDT
-                    lot_size = 0.01
-                    min_size = 0.01
-                    max_size = 1000.0
-            elif account.exchange_name == 'MEXC':
-                if 'BTC_USDT' in symbol:
-                    lot_size = 0.001
-                    min_size = 0.001
-                    max_size = 100.0
-                else:  # ETH_USDT
-                    lot_size = 0.01
-                    min_size = 0.01
-                    max_size = 1000.0
-            elif account.exchange_name == 'KuCoin':
-                if 'BTC-USDT' in symbol:
-                    lot_size = 0.001
-                    min_size = 0.001
-                    max_size = 100.0
-                else:  # ETH-USDT
-                    lot_size = 0.01
-                    min_size = 0.01
-                    max_size = 1000.0
-            else:
-                # Default values for other exchanges
-                lot_size = 0.001
-                min_size = 0.001
-                max_size = 100.0
+            # Get account balance
+            balance = await account.fetch_balance()
+            if not balance:
+                logger.warning(f"No balance found for {account.exchange_name}")
+                return False, "No balance found"
 
-            # Handle zero or None input
-            if size is None or size == 0:
-                return 0.0
+            logger.info(f"Processing {account.exchange_name} with balance: {balance}")
 
-            # Round to lot size precision
-            size_in_lots = round(size / lot_size)
-            rounded_size = size_in_lots * lot_size
-            
-            # Apply min/max constraints
-            if abs(rounded_size) < min_size:
-                # If close to min size, round up to min size
-                if abs(size) >= min_size / 2:
-                    return min_size if size > 0 else -min_size
-                # If too small, return 0.0 instead of None
-                return 0.0
-            
-            # Cap at max size
-            if abs(rounded_size) > max_size:
-                return max_size if rounded_size > 0 else -max_size
-            
-            return rounded_size
-            
+            # Process each symbol in the weight config
+            for symbol_config in self.weight_config:
+                signal_symbol = symbol_config['symbol']  # e.g., "BTCUSDT"
+                
+                # Map the signal symbol to exchange-specific format
+                exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
+                logger.info(f"Processing {signal_symbol} (Exchange format: {exchange_symbol})")
+
+                # Get signals for this symbol
+                tv_signal = tv_signals.get(signal_symbol, 0)
+                bt_signal = bt_signals.get(signal_symbol, 0)
+
+                # Calculate weighted signal
+                weighted_signal = self.get_weighted_signal(signal_symbol, tv_signal, bt_signal)
+                logger.info(f"Weighted signal for {signal_symbol}: {weighted_signal}")
+
+                if weighted_signal == 0:
+                    logger.info(f"No significant signal for {signal_symbol}, skipping")
+                    continue
+
+                # Calculate position size based on balance and leverage
+                leverage = symbol_config.get('leverage', 1)
+                size = self.calculate_position_size(weighted_signal, balance, leverage)
+                logger.info(f"Calculated size: {size}")
+
+                # Reconcile position
+                await account.reconcile_position(
+                    symbol=exchange_symbol,
+                    size=size,
+                    leverage=leverage,
+                    margin_mode="isolated"  # Default to isolated margin
+                )
+
+            return True, None
+
         except Exception as e:
-            logger.error(f"Error rounding size for {account.exchange_name}: {str(e)}")
-            # Return 0.0 instead of None on error
-            return 0.0
+            error_msg = f"Error processing {account.exchange_name}: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
 
     async def execute(self):
         """Main execution loop"""
