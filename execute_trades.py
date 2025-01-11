@@ -93,8 +93,9 @@ class TradeExecutor:
                 signal_symbol = symbol_config['symbol']
                 depth = signals.get(signal_symbol, 0)
                 
-                if abs(depth) < 0.01:  # Ignore very small signals
-                    continue
+                # NO: All depth signals are processed
+                #if abs(depth) < 0.01:  # Ignore very small signals
+                #    continue
 
                 # Map to exchange symbol format
                 exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
@@ -159,6 +160,8 @@ class TradeExecutor:
             
             # Process each account
             for account in self.accounts:
+                # print a separator with ======
+                print("\n================================================")
                 logger.info(f"\nProcessing {account.exchange_name} account")
                 success, error = await self.process_account(account, signals)
                 if not success:
@@ -246,9 +249,10 @@ async def execute_trades(accounts, signals):
                 amount = exchange_amounts[signal.symbol]
                 
                 # Skip if amount is too small
-                if amount < 5:  # Minimum trade size
-                    print(f"Skipping {signal.symbol} on {account.exchange_name} - amount too small: {amount:.2f} USDT")
-                    continue
+                # TODO: there are exchange specific minimum trade sizes
+                #if amount < 5:  # Minimum trade size
+                #    print(f"Skipping {signal.symbol} on {account.exchange_name} - amount too small: {amount:.2f} USDT")
+                #    continue
                     
                 try:
                     # Reconcile position with calculated amount
