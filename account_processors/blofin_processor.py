@@ -5,6 +5,7 @@ from config.credentials import load_blofin_credentials
 from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
+from core.utils.execute_timed import execute_with_timeout
 
 
 class BloFin:
@@ -220,16 +221,17 @@ class BloFin:
             print(f"Processing {lots} lots of {symbol} with market order")
 
             # Place the market order
-            order = self.blofin_client.trading.place_order(
+            order = await execute_with_timeout(
+                self.blofin_client.trading.place_order,
+                timeout=5,
                 inst_id=symbol,
                 side=side.lower(),
                 position_side="net", # Adjust based on your account mode (e.g., 'net', 'long', 'short')
-                price=0, # not needed for market order
                 size=lots,
                 leverage=leverage,
                 order_type="market",  # Market order type
                 margin_mode=margin_mode,
-                clientOrderId=client_order_id,
+                clientOrderId=client_order_id
             )
             print(f"Market Order Placed: {order}")
             return order

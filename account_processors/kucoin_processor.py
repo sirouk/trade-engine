@@ -5,6 +5,7 @@ from config.credentials import load_kucoin_credentials
 from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
+from core.utils.execute_timed import execute_with_timeout
 
 
 class KuCoin:
@@ -255,13 +256,15 @@ class KuCoin:
             
 
             # Place the market order
-            order = self.trade_client.create_market_order(
+            order = await execute_with_timeout(
+                self.trade_client.create_market_order,
+                timeout=5,
                 symbol=symbol,
                 side=side.lower(),
                 size=lots,
                 lever=leverage,
-                clientOid=client_oid,
                 marginMode=kucoin_margin_mode,
+                clientOid=client_oid
             )
             print(f"Market Order Placed: {order}")
             return order

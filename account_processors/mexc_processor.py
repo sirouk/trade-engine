@@ -5,6 +5,7 @@ from config.credentials import load_mexc_credentials
 from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
+from core.utils.execute_timed import execute_with_timeout
 
 
 class MEXC:
@@ -240,7 +241,9 @@ class MEXC:
             
             mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
             
-            order = self.futures_client.order(
+            order = await execute_with_timeout(
+                self.futures_client.order,
+                timeout=5,  # Specify custom timeout
                 symbol=symbol,
                 vol=lots,
                 side=side,
@@ -252,6 +255,7 @@ class MEXC:
             )
             print(f"Market Order Placed: {order}")
             return order
+
         except Exception as e:
             print(f"Error placing market order: {str(e)}")
 

@@ -5,6 +5,7 @@ from config.credentials import load_bybit_credentials
 from core.utils.modifiers import round_to_tick_size, calculate_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
+from core.utils.execute_timed import execute_with_timeout
 
 
 class ByBit:
@@ -293,7 +294,9 @@ class ByBit:
                 except Exception as e:
                     print(f"Leverage unchanged: {str(e)}")
 
-            order = self.bybit_client.place_order(
+            order = await execute_with_timeout(
+                self.bybit_client.place_order,
+                timeout=5,
                 category="linear",
                 symbol=symbol,
                 side=side.capitalize(),
@@ -301,7 +304,7 @@ class ByBit:
                 order_type="Market",
                 isLeverage=1,
                 orderLinkId=client_oid,
-                positionIdx=0,
+                positionIdx=0
             )
             print(f"Market Order Placed: {order}")
             return order
