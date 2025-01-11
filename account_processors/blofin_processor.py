@@ -192,6 +192,14 @@ class BloFin:
         size_in_lots = max(abs(size_in_lots), min_lots)  # Work with absolute value
         size_in_lots *= sign  # Reapply the original sign
         print(f"Size after checking min: {size_in_lots}")
+        
+        # Calculate number of decimal places from lot_size
+        decimal_places = len(str(lot_size).split('.')[-1]) if '.' in str(lot_size) else 0
+        # Round to the nearest lot size using the correct decimal places
+        size_in_lots = round(size_in_lots / lot_size) * lot_size
+        # Format to avoid floating point precision issues
+        size_in_lots = float(f"%.{decimal_places}f" % size_in_lots)
+        print(f"Size after rounding to lot size: {size_in_lots}")
 
         # Step 3: Round the price to the nearest tick size
         print(f"Price before: {price}")
@@ -256,6 +264,7 @@ class BloFin:
                 inst_id=symbol,
                 side=side.lower(),
                 position_side="net", # Adjust based on your account mode (e.g., 'net', 'long', 'short')
+                price=0, # required for market orders
                 size=lots,
                 leverage=leverage,
                 order_type="market",  # Market order type
@@ -296,7 +305,7 @@ class BloFin:
                 inst_id=symbol,
                 side=side.lower(),
                 position_side=position["positionSide"],  # Ensure the same position mode
-                price=0,
+                price=0, # required for market orders
                 size=size,
                 leverage=int(position["leverage"]),
                 order_type="market",  # Market order to close the position
@@ -361,7 +370,7 @@ class BloFin:
             size_diff = size - current_size
             
             # Format size_diff using lot_size precision
-            decimal_places = len(str(lot_size).split('.')[-1]) if '.' in str(lot_size) else 0
+            decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
             size_diff = float(f"%.{decimal_places}f" % size_diff)
             
             print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
