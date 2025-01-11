@@ -92,50 +92,67 @@ You'll be prompted for the following credentials:
 
 ## Configuring Signal Weights
 
-The trade engine uses weights to determine how much influence each signal source has. Configure these in `signal_weight_config.json`:
+The trade engine uses weights to determine how much influence each signal source has for each trading pair. Run the configuration script:
 
 ```bash
 python3 config/signal_weights.py
 ```
 
-This will create a configuration file with default weights that you can adjust:
+You'll be prompted to configure each trading pair:
 
-```bash
+1. Set the leverage (1-20) for each symbol:
+   ```
+   Configuring BTCUSDT
+   Enter leverage for BTCUSDT: 3
+   ```
+
+2. Assign weights to each signal source (weights must sum to ≤ 1.0):
+   ```
+   Assign weight for BTCUSDT from tradingview (remaining weight: 1.00, press Enter to skip): 0.10
+   Assign weight for BTCUSDT from bittensor (remaining weight: 0.90, press Enter to skip): 0.15
+   ```
+
+The configuration will be saved to `signal_weight_config.json`. Here's an example:
+
+```json
 {
-    "symbols": [
+    [
         {
             "symbol": "BTCUSDT",
+            "leverage": 3,
             "sources": [
                 {
                     "source": "tradingview",
-                    "weight": 1.0
+                    "weight": 0.1
                 },
                 {
                     "source": "bittensor",
-                    "weight": 0.0
+                    "weight": 0.15
                 }
-            ],
-            "leverage": 1
+            ]
         },
         {
             "symbol": "ETHUSDT",
+            "leverage": 3,
             "sources": [
                 {
                     "source": "tradingview",
-                    "weight": 1.0
+                    "weight": 0.1
                 },
                 {
                     "source": "bittensor",
-                    "weight": 0.0
+                    "weight": 0.15
                 }
-            ],
-            "leverage": 1
+            ]
         }
     ]
 }
 ```
 
-Adjust the weights and leverage values as needed. A weight of 0.0 disables that signal source for that symbol.
+- A weight of 0.0 or skipping a source disables it for that symbol
+- Weights represent the influence of each signal source
+- Total weights per symbol should not exceed 1.0
+- Higher leverage increases position sizes proportionally
 
 To update either configuration later, simply rerun the respective configuration script.
 
