@@ -1,8 +1,8 @@
 import json
 import asyncio
 from dataclasses import dataclass, asdict
-from signal_processors.tradingview_processor import SIGNAL_SOURCE as TRADINGVIEW_SIGNAL_SOURCE, CORE_ASSET_MAPPING as TRADINGVIEW_ASSET_MAPPING
-from signal_processors.bittensor_processor import SIGNAL_SOURCE as BITTENSOR_SIGNAL_SOURCE, CORE_ASSET_MAPPING as BITTENSOR_ASSET_MAPPING
+from signal_processors.tradingview_processor import TradingViewProcessor
+from signal_processors.bittensor_processor import BittensorProcessor
 from collections import defaultdict
 
 CONFIG_FILE = "signal_weight_config.json"
@@ -26,9 +26,11 @@ class UnifiedSymbolConfig:
 
 def load_signal_sources():
     """Fetch each signal source."""
+    tv = TradingViewProcessor()
+    bt = BittensorProcessor()
     return [
-        SignalSource(name=TRADINGVIEW_SIGNAL_SOURCE, core_asset_mapping=TRADINGVIEW_ASSET_MAPPING),
-        SignalSource(name=BITTENSOR_SIGNAL_SOURCE, core_asset_mapping=BITTENSOR_ASSET_MAPPING),
+        SignalSource(name=tv.SIGNAL_SOURCE, core_asset_mapping=tv.CORE_ASSET_MAPPING),
+        SignalSource(name=bt.SIGNAL_SOURCE, core_asset_mapping=bt.CORE_ASSET_MAPPING),
     ]
 
 def prompt_for_leverage(symbol):
