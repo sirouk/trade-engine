@@ -19,7 +19,8 @@ class BittensorProcessor:
 
     def __init__(self, *, enabled=True):
         self.credentials = load_bittensor_credentials()
-        self.enabled = enabled
+        #self.enabled = enabled
+        self.enabled = False
         
     async def fetch_signals(self):
         """Main entry point to fetch and process signals."""
