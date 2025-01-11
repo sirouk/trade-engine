@@ -170,7 +170,7 @@ class BloFin:
         price = round_to_tick_size(price, tick_size)
         print(f"Price after tick rounding: {price}")
 
-        return size_in_lots, price
+        return size_in_lots, price, lot_size
 
     async def _place_limit_order_test(self, ):
         """Place a limit order on BloFin."""
@@ -190,7 +190,7 @@ class BloFin:
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
             # Fetch and scale the size and price
-            lots, price = await self.scale_size_and_price(symbol, size, price)
+            lots, price, _ = await self.scale_size_and_price(symbol, size, price)
             print(f"Ordering {lots} lots @ {price}")
             #quit()
             
@@ -287,7 +287,7 @@ class BloFin:
             current_position = unified_positions[0] if unified_positions else None
 
             if size != 0:
-                size, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
+                size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
 
             # Initialize position state variables
             current_size = current_position.size if current_position else 0
@@ -324,6 +324,11 @@ class BloFin:
 
             # Calculate the remaining size difference after any position closure
             size_diff = size - current_size
+            
+            # Format size_diff using lot_size precision
+            decimal_places = len(str(lot_size).split('.')[-1]) if '.' in str(lot_size) else 0
+            size_diff = float(f"%.{decimal_places}f" % size_diff)
+            
             print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 
             if size_diff == 0:

@@ -181,13 +181,21 @@ class ByBit:
         size_in_lots = max(abs(size_in_lots), min_lots)  # Work with absolute value
         size_in_lots *= sign  # Reapply the original sign
         print(f"Size after checking min: {size_in_lots}")
+        
+        # Calculate number of decimal places from lot_size
+        decimal_places = len(str(lot_size).split('.')[-1]) if '.' in str(lot_size) else 0
+        # Round to the nearest lot size using the correct decimal places
+        size_in_lots = round(size_in_lots / lot_size) * lot_size
+        # Format to avoid floating point precision issues
+        size_in_lots = float(f"%.{decimal_places}f" % size_in_lots)
+        print(f"Size after rounding to lot size: {size_in_lots}")
 
         # Step 3: Round the price to the nearest tick size
         print(f"Price before: {price}")
         price = round_to_tick_size(price, tick_size)
         print(f"Price after tick rounding: {price}")
 
-        return size_in_lots, price
+        return size_in_lots, price, lot_size
 
     async def _place_limit_order_test(self,):
         """Place a limit order on Bybit."""
@@ -213,7 +221,7 @@ class ByBit:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
             # Fetch and scale the size and price
-            lots, price = await self.scale_size_and_price(symbol, size, price)
+            lots, price, _ = await self.scale_size_and_price(symbol, size, price)
             print(f"Ordering {lots} lots @ {price}")
             #quit()
             
@@ -346,7 +354,7 @@ class ByBit:
 
             # Scale the target size to match exchange requirements
             if size != 0:
-                size, _ = await self.scale_size_and_price(symbol, size, price=0)  # No price needed for market orders
+                size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price needed for market orders
 
             # Initialize current state variables
             current_size = current_position.size if current_position else 0
@@ -383,6 +391,11 @@ class ByBit:
 
             # Calculate the size difference after potential closure
             size_diff = size - current_size
+            
+            # Format size_diff using lot_size precision
+            decimal_places = len(str(lot_size).split('.')[-1]) if '.' in str(lot_size) else 0
+            size_diff = float(f"%.{decimal_places}f" % size_diff)
+            
             print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 
             # If the target size is already reached, no action is needed
