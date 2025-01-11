@@ -328,8 +328,9 @@ class BloFin:
             unified_positions = await self.fetch_and_map_positions(symbol)
             current_position = unified_positions[0] if unified_positions else None
 
-            if size != 0:
-                size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
+            #if size != 0:
+            # Always scale as we need lot_size
+            size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
 
             # Initialize position state variables
             current_size = current_position.size if current_position else 0

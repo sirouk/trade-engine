@@ -182,6 +182,11 @@ class KuCoin:
         lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
         print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
         
+        # if size is 0, set size_in_lots to 0
+        if size == 0:
+            size_in_lots = 0
+            return size_in_lots, price, lot_size
+        
         # Step 1: Calculate the number of lots required
         print(f"Desired size: {size}")
         size_in_lots = calculate_lots(size, contract_value)
@@ -343,8 +348,9 @@ class KuCoin:
             current_position = unified_positions[0] if unified_positions else None
 
             # Scale the target size to match exchange requirements
-            if size != 0:
-                size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price needed for market orders
+            #if size != 0:
+            # Always scale as we need lot_size
+            size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price needed for market orders
 
             # Initialize position state variables
             current_size = current_position.size if current_position else 0
