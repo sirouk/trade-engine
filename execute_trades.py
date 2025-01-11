@@ -284,7 +284,7 @@ async def main():
             
             # Wait for next cycle (5 minutes)
             logger.info("Execution complete, waiting for next cycle...")
-            time.sleep(300)
+            #time.sleep(60)
             
         except Exception as e:
             logger.error(f"Error in main loop: {str(e)}")
