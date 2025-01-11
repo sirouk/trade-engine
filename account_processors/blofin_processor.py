@@ -40,7 +40,16 @@ class BloFin:
             return balance
         except Exception as e:
             print(f"Error fetching balance: {str(e)}")
-
+            
+    # fetch all open positions
+    async def fetch_all_open_positions(self):
+        try:
+            positions = self.blofin_client.trading.get_positions()
+            #print(f"All Open Positions: {positions}")
+            return positions
+        except Exception as e:
+            print(f"Error fetching all open positions: {str(e)}")
+    
     async def fetch_open_positions(self, symbol):
         try:
             # Get open positions for a specific instrument (example: BTC-USDT)
@@ -378,9 +387,32 @@ class BloFin:
             return f"{base}-USDT"
         return signal_symbol
 
+    async def fetch_total_account_value(self) -> float:
+        """Calculate total account value from balance and initial margin of positions."""
+        try:
+            # Get available balance
+            balance = await self.fetch_balance("USDT")
+            available_balance = float(balance) if balance else 0.0
+            print(f"Available Balance: {available_balance} USDT")
+            
+            # Get positions directly - BloFin provides margin directly
+            positions = await self.fetch_all_open_positions()
+            position_margin = 0.0
+            if positions and "data" in positions:
+                for pos in positions["data"]:
+                    position_margin += float(pos["margin"])  # Direct margin value
+            print(f"Position Initial Margin: {position_margin} USDT")
+            
+            total_value = available_balance + position_margin
+            print(f"BloFin Total Account Value: {total_value} USDT")
+            return total_value
+            
+        except Exception as e:
+            print(f"Error calculating total account value: {str(e)}")
+            return 0.0
+
 
 async def main():
-
     # Start a time
     start_time = datetime.datetime.now()
     
@@ -425,8 +457,26 @@ async def main():
     # positions = await blofin.fetch_and_map_positions(symbol="BTC-USDT")
     # #print(positions)
     
-    # Test symbol formats
-    await blofin.test_symbol_formats()
+        #print("\nTesting total account value calculation:")
+    #total_value = await blofin.fetch_total_account_value()
+    #print(f"Final Total Account Value: {total_value} USDT")
+    
+    # Test all open positions
+    #print("\nTesting all open positions:")
+    #positions = await blofin.fetch_all_open_positions()
+    # positions is a dictionary
+    #for key, value in positions.items():
+    #    if "data" in key:
+    #        for pos in value:
+    #            print(f"")
+    #            for dkey, dvalue in pos.items():
+    #                print(f"Field: {dkey}, Value: {dvalue}")
+    #print(f"All Open Positions: {positions}")
+
+    # Test total account value calculation
+    print("\nTesting total account value calculation:")
+    total_value = await blofin.fetch_total_account_value()
+    print(f"Final Total Account Value: {total_value} USDT")
     
     # End time
     end_time = datetime.datetime.now()

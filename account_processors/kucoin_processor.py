@@ -49,6 +49,15 @@ class KuCoin:
             return balance
         except Exception as e:
             print(f"Error fetching balance: {str(e)}")
+        
+    # fetch all open positions
+    async def fetch_all_open_positions(self):
+        try:
+            positions = self.trade_client.get_all_position()
+            #print(f"All Open Positions: {positions}")
+            return positions
+        except Exception as e:
+            print(f"Error fetching all open positions: {str(e)}")
 
     async def fetch_open_positions(self, symbol):
         """Fetch open futures positions."""
@@ -405,6 +414,29 @@ class KuCoin:
             return f"{base}USDTM"
         return signal_symbol
 
+    async def fetch_total_account_value(self) -> float:
+        """Calculate total account value from balance and initial margin of positions."""
+        try:
+            # Get available balance
+            balance = await self.fetch_balance("USDT")
+            available_balance = float(balance) if balance else 0.0
+            print(f"Available Balance: {available_balance} USDT")
+            
+            # Get positions directly - KuCoin provides posInit (initial margin)
+            positions = await self.fetch_all_open_positions()
+            position_margin = 0.0
+            for pos in positions:
+                position_margin += float(pos["posInit"])  # Direct initial margin value
+            print(f"Position Initial Margin: {position_margin} USDT")
+            
+            total_value = available_balance + position_margin
+            print(f"KuCoin Total Account Value: {total_value} USDT")
+            return total_value
+            
+        except Exception as e:
+            print(f"Error calculating total account value: {str(e)}")
+            return 0.0
+
 
 async def main():
     
@@ -455,7 +487,12 @@ async def main():
     # #print(positions)
     
     # Test symbol formats
-    await kucoin.test_symbol_formats()
+    # await kucoin.test_symbol_formats()
+    
+    # Test total account value calculation
+    print("\nTesting total account value calculation:")
+    total_value = await kucoin.fetch_total_account_value()
+    print(f"Final Total Account Value: {total_value} USDT")
     
     # End time
     end_time = datetime.datetime.now()

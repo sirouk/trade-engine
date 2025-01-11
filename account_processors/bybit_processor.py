@@ -43,6 +43,15 @@ class ByBit:
             return balance
         except Exception as e:
             print(f"Error fetching balance: {str(e)}")
+            
+    # fetch all open positions
+    async def fetch_all_open_positions(self):
+        try:
+            positions = self.bybit_client.get_positions(category="linear", settleCoin=self.SETTLE_COIN)
+            #print(f"All Open Positions: {positions}")
+            return positions
+        except Exception as e:
+            print(f"Error fetching all open positions: {str(e)}")
 
     async def fetch_open_positions(self, symbol):
         try:
@@ -439,9 +448,32 @@ class ByBit:
         # Bybit uses the same format as our signals, no conversion needed
         return signal_symbol
 
+    async def fetch_total_account_value(self) -> float:
+        """Calculate total account value from balance and initial margin of positions."""
+        try:
+            # Get available balance
+            balance = await self.fetch_balance("USDT")
+            available_balance = float(balance) if balance else 0.0
+            print(f"Available Balance: {available_balance} USDT")
+            
+            # Get positions directly - Bybit provides positionIM (initial margin)
+            positions = await self.fetch_all_open_positions()
+            position_margin = 0.0
+            if positions and "result" in positions:
+                for pos in positions["result"]["list"]:
+                    position_margin += float(pos["positionIM"])  # Direct initial margin value
+            print(f"Position Initial Margin: {position_margin} USDT")
+            
+            total_value = available_balance + position_margin
+            print(f"ByBit Total Account Value: {total_value} USDT")
+            return total_value
+            
+        except Exception as e:
+            print(f"Error calculating total account value: {str(e)}")
+            return 0.0
+
 
 async def main():   
-    
     # Start a time
     start_time = datetime.datetime.now()
     
@@ -488,7 +520,12 @@ async def main():
     #print(positions)
     
     # Test symbol formats
-    await bybit.test_symbol_formats()
+    # await bybit.test_symbol_formats()
+    
+    # Test total account value calculation
+    print("\nTesting total account value calculation:")
+    total_value = await bybit.fetch_total_account_value()
+    print(f"Final Total Account Value: {total_value} USDT")
     
     # End time
     end_time = datetime.datetime.now()
