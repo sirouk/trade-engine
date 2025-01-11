@@ -81,6 +81,11 @@ class TradeExecutor:
     async def process_account(self, account, signals: Dict):
         """Process signals for a specific account."""
         try:
+            # Skip disabled accounts
+            if not account.enabled:
+                logger.info(f"Skipping disabled account: {account.exchange_name}")
+                return True, None  # Return success but do nothing
+                
             # Get total account value (including positions)
             total_value = await account.fetch_total_account_value()
             if not total_value:

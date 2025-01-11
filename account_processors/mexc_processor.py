@@ -12,6 +12,7 @@ class MEXC:
     def __init__(self):
         
         self.exchange_name = "MEXC"
+        self.enabled = False
         
         # Load MEXC Futures API credentials from the credentials file
         self.credentials = load_mexc_credentials()

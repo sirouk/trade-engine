@@ -12,6 +12,7 @@ class KuCoin:
     def __init__(self):
         
         self.exchange_name = "KuCoin"
+        self.enabled = True
         
         # Load KuCoin Futures API credentials from the credentials file
         self.credentials = load_kucoin_credentials()
@@ -475,8 +476,12 @@ class KuCoin:
             # Get positions directly - KuCoin provides posInit (initial margin)
             positions = await self.fetch_all_open_positions()
             position_margin = 0.0
-            for pos in positions:
-                position_margin += float(pos["posInit"])  # Direct initial margin value
+            
+            # KuCoin returns a list when there are no positions
+            if isinstance(positions, list):
+                for pos in positions:
+                    position_margin += float(pos["posInit"])  # Direct initial margin value
+            
             print(f"Position Initial Margin: {position_margin} USDT")
             
             total_value = available_balance + position_margin

@@ -12,6 +12,7 @@ class BloFin:
     def __init__(self):
         
         self.exchange_name = "BloFin"
+        self.enabled = True
         
         self.credentials = load_blofin_credentials()
         

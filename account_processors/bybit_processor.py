@@ -12,6 +12,7 @@ class ByBit:
     def __init__(self):
         
         self.exchange_name = "ByBit"
+        self.enabled = True
             
         # Load Bybit API key and secret from your credentials file
         self.credentials = load_bybit_credentials()
