@@ -3,7 +3,7 @@ from datetime import datetime
 import asyncio
 import numpy as np
 from math import sqrt, log1p, prod
-from signal_processors.bittensor_processor import fetch_bittensor_signals, load_bittensor_credentials, RAW_SIGNALS_DIR
+from signal_processors.bittensor_processor import BittensorProcessor, RAW_SIGNALS_DIR
 
 def filter_positions_by_assets(data, asset_list):
     """Filter positions to include only those with specified assets."""
@@ -289,11 +289,8 @@ async def get_ranked_miners(assets_to_trade=None):
     """
     Fetch ranked miners and display the results along with their ranks.
     """
-    credentials = load_bittensor_credentials()
-    api_key = credentials.bittensor_sn8.api_key
-    endpoint = credentials.bittensor_sn8.endpoint
-
-    positions_data = await fetch_bittensor_signals(api_key, endpoint)
+    processor = BittensorProcessor(enabled=True)
+    positions_data = await processor._fetch_raw_signals()
     
     # establish the key count cache file path
     miner_count_cache_filename = "miner_count_cache.txt"

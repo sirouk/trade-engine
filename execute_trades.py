@@ -6,8 +6,8 @@ from datetime import datetime
 from collections import defaultdict
 import asyncio
 
-from signal_processors.tradingview_processor import fetch_tradingview_signals
-from signal_processors.bittensor_processor import fetch_bittensor_signal
+from signal_processors.tradingview_processor import TradingViewProcessor
+from signal_processors.bittensor_processor import BittensorProcessor
 from account_processors.bybit_processor import ByBit
 from account_processors.blofin_processor import BloFin
 from account_processors.kucoin_processor import KuCoin
@@ -89,6 +89,26 @@ class ExchangeLogger:
 
 class TradeExecutor:
     def __init__(self):
+        # Load signal weight configuration
+        try:
+            with open('signal_weight_config.json', 'r') as f:
+                self.weight_config = json.load(f)
+        except FileNotFoundError:
+            logger.error("signal_weight_config.json not found")
+            raise
+
+        # Initialize processors with enabled state based on non-zero weights
+        self.bittensor_processor = BittensorProcessor(
+            enabled=any(any(s['weight'] > 0 for s in symbol['sources'] 
+                          if s['source'] == 'bittensor') 
+                       for symbol in self.weight_config)
+        )
+        self.tradingview_processor = TradingViewProcessor(
+            enabled=any(any(s['weight'] > 0 for s in symbol['sources'] 
+                          if s['source'] == 'tradingview') 
+                       for symbol in self.weight_config)
+        )
+        
         # Initialize exchange accounts
         self.accounts = [
             ByBit(),
@@ -100,23 +120,12 @@ class TradeExecutor:
         # Create a global logger for non-account-specific logs
         self.global_logger = ExchangeLogger("Global", logger)
         
-        # Load signal weight configuration
-        try:
-            with open('signal_weight_config.json', 'r') as f:
-                self.weight_config = json.load(f)
-        except FileNotFoundError:
-            logger.error("signal_weight_config.json not found")
-            raise
-
     async def get_signals(self) -> Dict:
         """Fetch and combine signals from all sources."""
-        with self.global_logger:  # Use global logger for signal processing
+        with self.global_logger:
             try:
-                tv_signals = fetch_tradingview_signals()
-                bt_signals = await fetch_bittensor_signal(top_miners=5)
-                
-                logger.info(f"TradingView signals: {tv_signals}")
-                logger.info(f"Bittensor signals: {bt_signals}")
+                tv_signals = {}
+                bt_signals = []
                 
                 # Combine signals using weights from config
                 combined_signals = {}
@@ -128,6 +137,15 @@ class TradeExecutor:
                                     if s['source'] == 'tradingview'), 0)
                         bt_weight = next((s['weight'] for s in symbol_config['sources'] 
                                     if s['source'] == 'bittensor'), 0)
+                        
+                        # Fetch signals only if source is enabled and has non-zero weight
+                        if tv_weight > 0 and self.tradingview_processor.enabled and not tv_signals:
+                            tv_signals = self.tradingview_processor.fetch_signals()
+                            logger.info(f"TradingView signals: {tv_signals}")
+                            
+                        if bt_weight > 0 and self.bittensor_processor.enabled and not bt_signals:
+                            bt_signals = await self.bittensor_processor.fetch_signals()
+                            logger.info(f"Bittensor signals: {bt_signals}")
                         
                         # Extract depth from TradingView signal structure
                         tv_depth = float(tv_signals.get(symbol, {}).get('depth', 0)) if isinstance(tv_signals.get(symbol), dict) else 0
