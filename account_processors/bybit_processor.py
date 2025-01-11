@@ -415,17 +415,29 @@ class ByBit:
                     
                     print(f"\nBybit Symbol Information for {symbol}:")
                     print(f"Native Symbol Format: {symbol}")
-                    print(f"Full Response: {instrument}")
+                    #print(f"Full Response: {instrument}")
                     
                     # Try to fetch a ticker to verify symbol works
                     ticker = await self.fetch_tickers(symbol)
-                    print(f"Ticker Test: {ticker}")
+                    #print(f"Ticker Test: {ticker}")
                     
                 except Exception as e:
                     print(f"Error testing {symbol}: {str(e)}")
                     
+            # Add to test_symbol_formats() in each processor
+            test_symbols = ["BTCUSDT", "ETHUSDT"]
+            print("\nTesting symbol mapping:")
+            for symbol in test_symbols:
+                mapped = self.map_signal_symbol_to_exchange(symbol)
+                print(f"Signal symbol: {symbol} -> Exchange symbol: {mapped}")
+                    
         except Exception as e:
             print(f"Error in symbol format test: {str(e)}")
+
+    def map_signal_symbol_to_exchange(self, signal_symbol: str) -> str:
+        """Convert signal symbol format (e.g. BTCUSDT) to exchange format."""
+        # Bybit uses the same format as our signals, no conversion needed
+        return signal_symbol
 
 
 async def main():   
