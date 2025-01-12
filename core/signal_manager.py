@@ -121,6 +121,15 @@ class SignalManager:
                 signals = processor.fetch_signals()
                 prev_signals = self.previous_signals.get(source, {})
                 
+                logger.info(f"Current signals for {source}: {signals}")
+                logger.info(f"Previous signals for {source}: {prev_signals}")
+                
+                # Make sure signal.leverage is set for all signals according to self.config
+                for symbol_config in self.config:
+                    symbol = symbol_config['symbol']
+                    leverage = symbol_config['leverage']
+                    signals[symbol]['leverage'] = leverage
+                    
                 # Check if raw signals changed
                 if signals != prev_signals:
                     has_updates = True
@@ -149,7 +158,7 @@ class SignalManager:
                     signals = current_signals.get(source, {})
                     depth = float(signals.get(symbol, {}).get('depth', 0)) \
                         if isinstance(signals.get(symbol), dict) else 0
-                    # weight (e.g. 0.30) defines max account allocation for margin
+                    # weight (e.g. 0.30) defines max account allocation of entire account value
                     # depth (e.g. 0.0235) defines what portion of that allocation to use
                     weighted_sum += depth * weight
                     total_weight += weight
@@ -157,12 +166,13 @@ class SignalManager:
             
             if total_weight > 0:
                 # Final depth represents margin allocation relative to account value
-                asset_depths[symbol] = weighted_sum / total_weight
+                #asset_depths[symbol] = weighted_sum / total_weight
+                asset_depths[symbol] = weighted_sum
                 logger.info(f"  Combined depth: {asset_depths[symbol]}")
         
         logger.info("\n=== Account Asset Depths ===")
         # Check each account for changes
-        has_updates = False
+        #has_updates = False
         for account_name in all_account_names:
             account = next((acc for acc in accounts_to_check if acc.exchange_name == account_name), None)
             is_enabled = account.enabled if account else False
@@ -173,16 +183,20 @@ class SignalManager:
                 current_depth = current_depths.get(asset, 0)
                 target_depth = new_depth if is_enabled else 0
                 
+                # Round both depths to 4 decimal places for consistent comparison
+                current_depth = float(current_depth)
+                target_depth = float(target_depth)
+                
                 logger.info(f"  {asset}: current={current_depth}, target={target_depth}")
-                if abs(current_depth - target_depth) > 1e-10:
+                if current_depth != target_depth:
                     has_updates = True
                     new_depths[account_name][asset] = target_depth
                     # Mark all sources for this asset as needing updates
                     for source_config in next(
                         sc['sources'] for sc in self.config if sc['symbol'] == asset
                     ):
-                        if source_config['weight'] > 0:
-                            updates[source_config['source']] = True
+                        #if source_config['weight'] > 0:
+                        updates[source_config['source']] = True
         
         if has_updates:
             self._temp_depths = new_depths

@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from pymexc import futures
 from config.credentials import load_mexc_credentials
-from core.utils.modifiers import round_to_tick_size, calculate_lots
+from core.utils.modifiers import scale_size_and_price
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -200,44 +200,6 @@ class MEXC:
         except Exception as e:
             print(f"Error fetching symbol details: {str(e)}")
             return None
-            
-    async def scale_size_and_price(self, symbol: str, size: float, price: float):
-        """Scale size and price to match exchange requirements."""
-        
-        # Fetch symbol details (e.g., contract value, lot size, tick size)
-        lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
-        print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
-        
-        # if size is 0, set size_in_lots to 0
-        if size == 0:
-            size_in_lots = 0
-            return size_in_lots, price, lot_size
-        
-        # Step 1: Calculate the number of lots required
-        print(f"Desired size: {size}")
-        size_in_lots = calculate_lots(size, contract_value)
-        print(f"Size in lots: {size_in_lots}")
-
-        # Step 2: Ensure the size meets the minimum size requirement
-        sign = -1 if size_in_lots < 0 else 1  # Capture the original sign
-        size_in_lots = max(abs(size_in_lots), min_lots)  # Work with absolute value
-        size_in_lots *= sign  # Reapply the original sign
-        print(f"Size after checking min: {size_in_lots}")
-        
-        # Calculate number of decimal places from lot_size
-        decimal_places = len(str(lot_size).split('.')[-1]) if '.' in str(lot_size) else 0
-        # Round to the nearest lot size using the correct decimal places
-        size_in_lots = round(size_in_lots / lot_size) * lot_size
-        # Format to avoid floating point precision issues
-        size_in_lots = float(f"%.{decimal_places}f" % size_in_lots)
-        print(f"Size after rounding to lot size: {size_in_lots}")
-
-        # Step 3: Round the price to the nearest tick size
-        print(f"Price before: {price}")
-        price = round_to_tick_size(price, tick_size)
-        print(f"Price after tick rounding: {price}")
-
-        return size_in_lots, price, lot_size
     
     async def _place_limit_order_test(self, ):
         """Place a limit order on MEXC Futures."""
@@ -252,9 +214,12 @@ class MEXC:
             order_type=1 # Limit order
             mex_margin_mode=1 # 1:isolated 2:cross
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+            
+            # Fetch symbol details (e.g., contract value, lot size, tick size)
+            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
 
             # Fetch and scale the size and price
-            lots, price, _ = await self.scale_size_and_price(symbol, size, price)
+            lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
             print(f"Ordering {lots} lots @ {price}")
             #quit()
             
@@ -279,8 +244,11 @@ class MEXC:
         try:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
+            # Fetch symbol details (e.g., contract value, lot size, tick size)
+            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            
             # If the size is already in lot size, don't scale it
-            lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
+            lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
             print(f"Processing {lots} lots of {symbol} with a {side} order")
             
             mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
@@ -327,10 +295,13 @@ class MEXC:
         try:
             unified_positions = await self.fetch_and_map_positions(symbol)
             current_position = unified_positions[0] if unified_positions else None
-
+            
+            # Fetch symbol details (e.g., contract value, lot size, tick size)
+            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            
             #if size != 0:
             # Always scale as we need lot_size
-            size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price for market orders
+            size, _, lot_size = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)  # No price for market orders
 
             # Initialize position state variables
             current_size = current_position.size if current_position else 0

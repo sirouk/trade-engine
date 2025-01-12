@@ -155,6 +155,9 @@ class TradeExecutor:
     async def process_account(self, account, signals: Dict):
         """Process signals for a specific account."""
         try:
+            # Update weight configg by calling the _load_weight_config
+            self._load_weight_config()
+            
             # Skip disabled accounts but still process with zero depths
             if not account.enabled:
                 logger.info(f"Skipping disabled account: {account.exchange_name}")
@@ -200,6 +203,10 @@ class TradeExecutor:
                 quantity = abs(position_value) / price
                 if depth < 0:
                     quantity = -quantity
+                    
+                leverage = symbol_config.get('leverage', 1)
+                
+                quantity = quantity * leverage
 
                 # Get symbol details to log the precision/lot requirements
                 symbol_details = await account.get_symbol_details(exchange_symbol)
@@ -217,7 +224,7 @@ class TradeExecutor:
                 await account.reconcile_position(
                     symbol=exchange_symbol,
                     size=quantity,  # Pass raw quantity, let exchange-specific logic handle precision
-                    leverage=symbol_config.get('leverage', 1),
+                    leverage=leverage,
                     margin_mode="isolated"
                 )
 

@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from pybit.unified_trading import HTTP # https://github.com/bybit-exchange/pybit/
 from config.credentials import load_bybit_credentials
-from core.utils.modifiers import round_to_tick_size, calculate_lots
+from core.utils.modifiers import scale_size_and_price
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -207,37 +207,6 @@ class ByBit:
                 return lot_size, min_size, tick_size, contract_value
         raise ValueError(f"Symbol {symbol} not found.")
 
-    async def scale_size_and_price(self, symbol: str, size: float, price: float):
-        """Scale size and price to match exchange requirements."""
-        
-        # Fetch symbol details
-        lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
-        print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
-        
-        # If size is 0, return early
-        if size == 0:
-            return 0, price, lot_size
-
-        # Calculate lots - keep everything as float until final output
-        size_in_lots = float(size / contract_value)
-        print(f"Size in lots: {size_in_lots}")
-
-        # Ensure minimum size
-        sign = -1 if size_in_lots < 0 else 1
-        size_in_lots = max(abs(size_in_lots), min_lots) * sign
-        print(f"Size after checking min: {size_in_lots}")
-        
-        # Round to lot size precision
-        decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-        size_in_lots = float(f"%.{decimal_places}f" % (round(size_in_lots / lot_size) * lot_size))
-        print(f"Size after rounding to lot size: {size_in_lots}")
-
-        # Round price to tick size
-        if price != 0:
-            price = float(f"%.{decimal_places}f" % (round(price / tick_size) * tick_size))
-
-        return size_in_lots, price, lot_size
-
     async def _place_limit_order_test(self,):
         """Place a limit order on Bybit."""
         try:
@@ -261,8 +230,11 @@ class ByBit:
             close_on_trigger=False
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
+            # Fetch symbol details (e.g., contract value, lot size, tick size)
+            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            
             # Fetch and scale the size and price
-            lots, price, _ = await self.scale_size_and_price(symbol, size, price)
+            lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
             print(f"Ordering {lots} lots @ {price}")
             #quit()
             
@@ -316,8 +288,12 @@ class ByBit:
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True, adjust_leverage: bool = True, adjust_margin_mode: bool = True):
         """Open a position with a market order."""
         try:
+            
+            # Fetch symbol details (e.g., contract value, lot size, tick size)
+            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            lots = (await self.scale_size_and_price(symbol, size, price=0))[0] if scale_lot_size else size
+            lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
             print(f"Processing {lots} lots of {symbol} with a {side} order.")
 
             if adjust_margin_mode:
@@ -404,11 +380,14 @@ class ByBit:
             # Fetch current positions for the given symbol
             unified_positions = await self.fetch_and_map_positions(symbol, fetch_margin_mode=size != 0)
             current_position = unified_positions[0] if unified_positions else None
+            
+            # Fetch symbol details (e.g., contract value, lot size, tick size)
+            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
 
             # Scale the target size to match exchange requirements
             #if size != 0:
             # Always scale as we need lot_size
-            size, _, lot_size = await self.scale_size_and_price(symbol, size, price=0)  # No price needed for market orders
+            size, _, lot_size = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)  # No price needed for market orders
 
             # Initialize current state variables
             current_size = current_position.size if current_position else 0
