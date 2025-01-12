@@ -210,38 +210,31 @@ class ByBit:
     async def scale_size_and_price(self, symbol: str, size: float, price: float):
         """Scale size and price to match exchange requirements."""
         
-        # Fetch symbol details (e.g., contract value, lot size, tick size)
+        # Fetch symbol details
         lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
         print(f"Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_lots}, Tick Size: {tick_size}, Contract Value: {contract_value}")
         
-        # if size is 0, set size_in_lots to 0
+        # If size is 0, return early
         if size == 0:
-            size_in_lots = 0
-            return size_in_lots, price, lot_size
-        
-        # Step 1: Calculate the number of lots required
-        print(f"Desired size: {size}")
-        size_in_lots = calculate_lots(size, contract_value)
+            return 0, price, lot_size
+
+        # Calculate lots - keep everything as float until final output
+        size_in_lots = float(size / contract_value)
         print(f"Size in lots: {size_in_lots}")
 
-        # Step 2: Ensure the size meets the minimum size requirement
-        sign = -1 if size_in_lots < 0 else 1  # Capture the original sign
-        size_in_lots = max(abs(size_in_lots), min_lots)  # Work with absolute value
-        size_in_lots *= sign  # Reapply the original sign
+        # Ensure minimum size
+        sign = -1 if size_in_lots < 0 else 1
+        size_in_lots = max(abs(size_in_lots), min_lots) * sign
         print(f"Size after checking min: {size_in_lots}")
         
-        # Calculate number of decimal places from lot_size
-        decimal_places = len(str(lot_size).split('.')[-1]) if '.' in str(lot_size) else 0
-        # Round to the nearest lot size using the correct decimal places
-        size_in_lots = round(size_in_lots / lot_size) * lot_size
-        # Format to avoid floating point precision issues
-        size_in_lots = float(f"%.{decimal_places}f" % size_in_lots)
+        # Round to lot size precision
+        decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
+        size_in_lots = float(f"%.{decimal_places}f" % (round(size_in_lots / lot_size) * lot_size))
         print(f"Size after rounding to lot size: {size_in_lots}")
 
-        # Step 3: Round the price to the nearest tick size
-        print(f"Price before: {price}")
-        price = round_to_tick_size(price, tick_size)
-        print(f"Price after tick rounding: {price}")
+        # Round price to tick size
+        if price != 0:
+            price = float(f"%.{decimal_places}f" % (round(price / tick_size) * tick_size))
 
         return size_in_lots, price, lot_size
 
@@ -457,11 +450,8 @@ class ByBit:
                         print(f"Failed to adjust leverage: {str(e)}")
 
             # Calculate the size difference after potential closure
-            size_diff = size - current_size
-            
-            # Format size_diff using lot_size precision
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-            size_diff = float(f"%.{decimal_places}f" % size_diff)
+            size_diff = float(f"%.{decimal_places}f" % (size - current_size))
             
             print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 

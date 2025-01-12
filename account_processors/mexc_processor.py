@@ -371,10 +371,8 @@ class MEXC:
                     current_size = 0 # Update current size to 0 after closing the position
 
             # Calculate size difference with proper precision
-            size_diff = size - current_size
-            # Format size_diff using lot_size precision
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-            size_diff = float(f"%.{decimal_places}f" % size_diff)
+            size_diff = float(f"%.{decimal_places}f" % (size - current_size))
             
             print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 
