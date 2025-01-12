@@ -12,6 +12,7 @@ from account_processors.bybit_processor import ByBit
 from account_processors.blofin_processor import BloFin
 from account_processors.kucoin_processor import KuCoin
 from account_processors.mexc_processor import MEXC
+from core.signal_manager import SignalManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +107,9 @@ class TradeExecutor:
         if not self._load_weight_config():
             raise RuntimeError("Failed to load initial weight configuration")
 
+        # Initialize signal manager
+        self.signal_manager = SignalManager()
+
         # Initialize processors with enabled state based on non-zero weights
         self.bittensor_processor = BittensorProcessor(
             enabled=any(any(s['weight'] > 0 for s in symbol['sources'] 
@@ -133,46 +137,16 @@ class TradeExecutor:
         """Fetch and combine signals from all sources."""
         with self.global_logger:
             try:
-                tv_signals = {}
-                bt_signals = []
+                # Check for updates in signal sources
+                updates = self.signal_manager.check_for_updates(self.accounts)
+                logger.info(f"Checking for updates: {updates}")
                 
-                # Combine signals using weights from config
-                combined_signals = {}
-                
-                for symbol_config in self.weight_config:
-                    try:
-                        symbol = symbol_config['symbol']
-                        tv_weight = next((s['weight'] for s in symbol_config['sources'] 
-                                    if s['source'] == 'tradingview'), 0)
-                        bt_weight = next((s['weight'] for s in symbol_config['sources'] 
-                                    if s['source'] == 'bittensor'), 0)
-                        
-                        # Fetch signals only if source is enabled and has non-zero weight
-                        if tv_weight > 0 and self.tradingview_processor.enabled and not tv_signals:
-                            tv_signals = self.tradingview_processor.fetch_signals()
-                            logger.info(f"TradingView signals: {tv_signals}")
-                            
-                        if bt_weight > 0 and self.bittensor_processor.enabled and not bt_signals:
-                            bt_signals = await self.bittensor_processor.fetch_signals()
-                            logger.info(f"Bittensor signals: {bt_signals}")
-                        
-                        # Extract depth from TradingView signal structure
-                        tv_depth = float(tv_signals.get(symbol, {}).get('depth', 0)) if isinstance(tv_signals.get(symbol), dict) else 0
-                        bt_depth = 0  # Temporarily set to 0 while bittensor is not working
-                        
-                        total_weight = tv_weight + bt_weight
-                        if total_weight > 0:
-                            weighted_depth = ((tv_depth * tv_weight) + (bt_depth * bt_weight)) / total_weight
-                            combined_signals[symbol] = weighted_depth
-                            logger.info(f"Processed {symbol}: TV depth={tv_depth}, TV weight={tv_weight}, "
-                                      f"Combined depth={weighted_depth}")
-                            
-                    except Exception as e:
-                        logger.error(f"Error processing signal for {symbol}: {str(e)}")
-                        continue
-                
-                logger.info(f"Combined signals: {combined_signals}")
-                return combined_signals
+                # Get the new depths that need to be applied
+                if hasattr(self.signal_manager, '_temp_depths'):
+                    return self.signal_manager._temp_depths
+                    
+                logger.info("No depth changes detected")
+                return {}
                 
             except Exception as e:
                 logger.error(f"Error fetching signals: {str(e)}")
@@ -181,10 +155,20 @@ class TradeExecutor:
     async def process_account(self, account, signals: Dict):
         """Process signals for a specific account."""
         try:
-            # Skip disabled accounts
+            # Skip disabled accounts but still process with zero depths
             if not account.enabled:
                 logger.info(f"Skipping disabled account: {account.exchange_name}")
-                return True, None  # Return success but do nothing
+                # Process all symbols with zero depth
+                for symbol_config in self.weight_config:
+                    signal_symbol = symbol_config['symbol']
+                    exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
+                    await account.reconcile_position(
+                        symbol=exchange_symbol,
+                        size=0,
+                        leverage=symbol_config.get('leverage', 1),
+                        margin_mode="isolated"
+                    )
+                return True, None
                 
             # Get total account value (including positions)
             total_value = await account.fetch_total_account_value()
@@ -196,12 +180,8 @@ class TradeExecutor:
 
             for symbol_config in self.weight_config:
                 signal_symbol = symbol_config['symbol']
-                depth = signals.get(signal_symbol, 0)
+                depth = signals.get(account.exchange_name, {}).get(signal_symbol, 0)  # Get account-specific depth
                 
-                # NO: All depth signals are processed
-                #if abs(depth) < 0.01:  # Ignore very small signals
-                #    continue
-
                 # Map to exchange symbol format
                 exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
                 
@@ -210,7 +190,7 @@ class TradeExecutor:
                 if not ticker:
                     logger.error(f"Could not get price for {exchange_symbol}")
                     continue
-                
+
                 price = ticker.last  # Use last price from ticker
 
                 # Calculate position value in USDT
@@ -257,34 +237,25 @@ class TradeExecutor:
 
     async def execute(self):
         """Execute trades based on signals."""
-        with self.global_logger:  # Use global logger for main execution flow
+        with self.global_logger:
             try:
-                # Reload weight configuration
-                if not self._load_weight_config():
-                    return False
-
                 signals = await self.get_signals()
+                if not signals:  # Skip execution if no signals or no changes
+                    logger.info("No signal changes detected, skipping execution")
+                    return True
                 
-                # Create tasks with prefixed logging
-                tasks = []
                 for account in self.accounts:
                     print(f"\n{'='*50}")
-                    task = asyncio.create_task(
-                        self.process_account_with_prefix(account, signals)
-                    )
-                    tasks.append(task)
+                    try:
+                        success, error = await self.process_account_with_prefix(account, signals)
+                        if success:
+                            logger.info(f"{account.exchange_name}: Successfully processed")
+                            self.signal_manager.confirm_execution(account.exchange_name, True)
+                        else:
+                            logger.error(f"{account.exchange_name}: Failed with exception: {str(result)}")
+                    except Exception as e:
+                        logger.error(f"{account.exchange_name}: Failed with exception: {str(e)}")
                 
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Process results
-                for account, result in zip(self.accounts, results):
-                    if isinstance(result, Exception):
-                        logger.error(f"{account.exchange_name}: Failed with exception: {str(result)}")
-                    else:
-                        success, error = result
-                        if not success:
-                            logger.error(f"{account.exchange_name}: Failed: {error}")
-                    
                 logger.info("\nExecution Summary")
                 return True
                 
@@ -366,12 +337,6 @@ async def execute_trades(accounts, signals):
             for signal in signals:
                 amount = exchange_amounts[signal.symbol]
                 
-                # Skip if amount is too small
-                # TODO: there are exchange specific minimum trade sizes
-                #if amount < 5:  # Minimum trade size
-                #    print(f"Skipping {signal.symbol} on {account.exchange_name} - amount too small: {amount:.2f} USDT")
-                #    continue
-                    
                 try:
                     # Reconcile position with calculated amount
                     await account.reconcile_position(

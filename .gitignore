@@ -28,3 +28,4 @@ __pycache__/
 **/credentials.json
 **/signal_weight_config.json
 **/*.pyc
+account_asset_depths.json
