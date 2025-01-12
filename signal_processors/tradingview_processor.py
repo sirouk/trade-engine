@@ -13,6 +13,7 @@ class TradingViewProcessor:
 
     def __init__(self, *, enabled=True):
         self.enabled = enabled
+        self.verbose = __name__ == '__main__'
 
     def fetch_signals(self):
         """Main entry point to fetch and process signals."""
@@ -39,12 +40,23 @@ class TradingViewProcessor:
 
     def _parse_signal_file(self, file_path, signals, symbol_dates):
         """Parse a signal file and update signals with the latest data."""
+        if self.verbose:
+            print(f"\nProcessing file: {file_path}")
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
+                    # Skip comment lines
+                    if line.strip().startswith('#'):
+                        if self.verbose:
+                            print(f"Skipping comment line: {line.strip()}")
+                        continue
+                        
                     # Parse the timestamp and signal data
                     date, timestamp, signal_data = line.split(" ", 2)
                     signal_data = json.loads(signal_data)
+                    if self.verbose:
+                        print(f"\nAnalyzing signal: {date} {timestamp}")
+                        print(f"Signal data: {signal_data}")
                 except ValueError:
                     print(f"Malformed line skipped: {line}")
                     continue
@@ -63,10 +75,14 @@ class TradingViewProcessor:
                     print(f"Invalid timestamp in line: {line}")
                     continue
 
-                # Skip older signals
-                if symbol in symbol_dates and symbol_dates[symbol] > line_timestamp:
+                # Skip if we already have a newer signal
+                if symbol in symbol_dates and line_timestamp < symbol_dates[symbol]:
+                    if self.verbose:
+                        print(f"Skipping older signal for {symbol}. Current: {symbol_dates[symbol]}, This: {line_timestamp}")
                     continue
-                symbol_dates[symbol] = line_timestamp  # Update timestamp
+                if self.verbose:
+                    print(f"Using signal for {symbol}. Timestamp: {line_timestamp}")
+                symbol_dates[symbol] = line_timestamp
 
                 # Validate and parse direction
                 direction = signal_data.get("direction")
@@ -94,10 +110,7 @@ class TradingViewProcessor:
 
                 # Parse price
                 try:
-                    price = float(signal_data.get("price", 0.0))
-                    if price <= 0.0:
-                        print(f"Invalid price: {price}")
-                        continue
+                    price = float(signal_data.get("price", 0.0)) if "price" in signal_data else None
                 except ValueError:
                     print(f"Price parsing error in line: {line}")
                     continue
@@ -107,7 +120,7 @@ class TradingViewProcessor:
                     "symbol": symbol,
                     "original_symbols": [original_symbol],
                     "depth": depth,
-                    "price": price,
+                    "price": price if price is not None and price > 0 else None,
                     "average_price": None,
                     "timestamp": line_timestamp,
                 }

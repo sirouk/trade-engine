@@ -16,7 +16,8 @@ from core.signal_manager import SignalManager
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %I:%M:%S %p'
 )
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ class ExchangeLogger:
         
         # Create new formatter that includes exchange name
         self.exchange_formatter = logging.Formatter(
-            f'%(asctime)s - %(levelname)s - [{exchange_name}] %(message)s'
+            f'%(asctime)s - %(levelname)s - [{exchange_name}] %(message)s',
+            datefmt='%Y-%m-%d %I:%M:%S %p'
         )
         
         # Store original print and logging functions
