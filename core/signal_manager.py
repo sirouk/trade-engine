@@ -96,24 +96,19 @@ class SignalManager:
         # Track all accounts that exist in either current accounts or cache
         all_account_names = set(acc.exchange_name for acc in accounts_to_check) | set(self.account_asset_depths.keys())
         
-        # Initialize new_depths with all configured symbols for each account
+        # Initialize with current depths instead of zeros
         for account_name in all_account_names:
-            # Get account object if it exists
             account = next((acc for acc in accounts_to_check if acc.exchange_name == account_name), None)
             is_enabled = account.enabled if account else False
             
-            new_depths[account_name] = {
-                symbol_config['symbol']: 0  # Initialize all symbols to zero
-                for symbol_config in self.config
-            }
+            # Start with current depths instead of zeros
+            new_depths[account_name] = self.account_asset_depths.get(account_name, {}).copy()
             
-            # If account exists in cache but is not in current accounts or is disabled,
-            # check if we need to zero out any non-zero positions
-            if account_name in self.account_asset_depths and not is_enabled:
-                cached_depths = self.account_asset_depths[account_name]
-                if any(abs(depth) > 1e-10 for depth in cached_depths.values()):
-                    logger.info(f"Account {account_name} needs zeroing due to disabled state")
-                    has_updates = True
+            # Only initialize missing symbols
+            for symbol_config in self.config:
+                symbol = symbol_config['symbol']
+                if symbol not in new_depths[account_name]:
+                    new_depths[account_name][symbol] = 0
         
         # Compare raw signals first
         for source, processor in self.signal_processors.items():
@@ -125,15 +120,24 @@ class SignalManager:
                 logger.info(f"Previous signals for {source}: {prev_signals}")
                 
                 # Make sure signal.leverage is set for all signals according to self.config
+                source_has_updates = False
                 for symbol_config in self.config:
                     symbol = symbol_config['symbol']
                     leverage = symbol_config['leverage']
-                    signals[symbol]['leverage'] = leverage
                     
-                # Check if raw signals changed
-                if signals != prev_signals:
-                    has_updates = True
-                    updates[source] = True
+                    # Only process symbols we care about from config
+                    if symbol in signals:
+                        signals[symbol]['leverage'] = leverage
+                        
+                        # Compare only relevant fields for this symbol
+                        curr_signal = signals.get(symbol, {})
+                        prev_signal = prev_signals.get(symbol, {})
+                        
+                        # Only consider it an update if depth or timestamp changed
+                        if (curr_signal.get('depth', 0) != prev_signal.get('depth', 0) or
+                            curr_signal.get('timestamp') != prev_signal.get('timestamp')):
+                            source_has_updates = True
+                            updates[source] = True
                 
                 current_signals[source] = signals
                 self.previous_signals[source] = signals
@@ -183,7 +187,7 @@ class SignalManager:
                 current_depth = current_depths.get(asset, 0)
                 target_depth = new_depth if is_enabled else 0
                 
-                # Round both depths to 4 decimal places for consistent comparison
+                # Round both depths for comparison
                 current_depth = float(current_depth)
                 target_depth = float(target_depth)
                 
@@ -195,7 +199,6 @@ class SignalManager:
                     for source_config in next(
                         sc['sources'] for sc in self.config if sc['symbol'] == asset
                     ):
-                        #if source_config['weight'] > 0:
                         updates[source_config['source']] = True
         
         if has_updates:
