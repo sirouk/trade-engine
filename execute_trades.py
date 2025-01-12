@@ -236,32 +236,33 @@ class TradeExecutor:
             return await self.process_account(account, signals)
 
     async def execute(self):
-        """Execute trades based on signals."""
-        with self.global_logger:
-            try:
-                signals = await self.get_signals()
-                if not signals:  # Skip execution if no signals or no changes
-                    logger.info("No signal changes detected, skipping execution")
-                    return True
-                
-                for account in self.accounts:
-                    print(f"\n{'='*50}")
-                    try:
-                        success, error = await self.process_account_with_prefix(account, signals)
-                        if success:
-                            logger.info(f"{account.exchange_name}: Successfully processed")
-                            self.signal_manager.confirm_execution(account.exchange_name, True)
-                        else:
-                            logger.error(f"{account.exchange_name}: Failed with exception: {str(result)}")
-                    except Exception as e:
-                        logger.error(f"{account.exchange_name}: Failed with exception: {str(e)}")
-                
-                logger.info("\nExecution Summary")
+        """Execute trades based on signal changes."""
+        try:
+            # Check for updates
+            updates = self.signal_manager.check_for_updates(self.accounts)
+            logger.info(f"Checking for updates: {updates}")
+            
+            # If no updates needed, skip execution
+            if not any(updates.values()):
+                logger.info("No signal changes detected, skipping execution")
                 return True
                 
-            except Exception as e:
-                logger.error(f"Error in execution: {str(e)}")
-                return False
+            # Get signals that need to be executed
+            signals = self.signal_manager._temp_depths
+            
+            # Process each account
+            for account in self.accounts:
+                success, error = await self.process_account_with_prefix(account, signals)
+                if success:
+                    self.signal_manager.confirm_execution(account.exchange_name, True)
+                else:
+                    logger.error(f"Error processing {account.exchange_name}: {error}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in execute: {str(e)}")
+            return False
 
 async def calculate_trade_amounts(accounts, signals):
     """Calculate trade amounts based on account values and signal weights."""
@@ -358,7 +359,7 @@ async def execute_trades(accounts, signals):
 async def main():
     executor = TradeExecutor()
     while True:
-        with executor.global_logger:  # Use global logger for main loop
+        with executor.global_logger:
             try:
                 now = datetime.now()
                 logger.info(f"Starting execution cycle at {now}")
@@ -372,6 +373,8 @@ async def main():
             except Exception as e:
                 logger.error(f"Error in main loop: {str(e)}")
                 time.sleep(60)  # Wait a minute before retrying on error
+            
+            time.sleep(1)
 
 if __name__ == "__main__":
     asyncio.run(main()) 
