@@ -19,6 +19,7 @@ class SignalManager:
         self.account_asset_depths = {}  # {account_name: {asset: depth}}
         self.config = self._load_config()
         self.previous_signals = {}  # Track previous raw signals
+        self._temp_depths = {}  # Initialize temp depths
         self._load_cache()
         self._initialize_processors()
         self.processors = self.signal_processors  # For compatibility with existing code
@@ -85,6 +86,9 @@ class SignalManager:
         current_signals = {}
         has_updates = False
         
+        # Reload config each time to catch changes
+        self.config = self._load_config()
+        
         logger.info("\n=== Signal Source Depths ===")
         # If no accounts provided, use all known account processors
         accounts_to_check = accounts if accounts is not None else self.account_processors.values()
@@ -145,11 +149,14 @@ class SignalManager:
                     signals = current_signals.get(source, {})
                     depth = float(signals.get(symbol, {}).get('depth', 0)) \
                         if isinstance(signals.get(symbol), dict) else 0
+                    # weight (e.g. 0.30) defines max account allocation for margin
+                    # depth (e.g. 0.0235) defines what portion of that allocation to use
                     weighted_sum += depth * weight
                     total_weight += weight
                     logger.info(f"  {source}: depth={depth}, weight={weight}")
             
             if total_weight > 0:
+                # Final depth represents margin allocation relative to account value
                 asset_depths[symbol] = weighted_sum / total_weight
                 logger.info(f"  Combined depth: {asset_depths[symbol]}")
         
@@ -181,6 +188,7 @@ class SignalManager:
             self._temp_depths = new_depths
             logger.info(f"Updates needed: {new_depths}")
         else:
+            self._temp_depths = self.account_asset_depths  # Use current depths if no updates
             logger.info("No depth changes detected")
         
         return updates
