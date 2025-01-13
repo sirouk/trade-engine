@@ -1,10 +1,13 @@
 import os
 from datetime import datetime, timedelta
 import ujson as json
+import zipfile
 
 class TradingViewProcessor:
     SIGNAL_SOURCE = "tradingview"
     RAW_SIGNALS_DIR = "raw_signals/tradingview"
+    ARCHIVE_DIR = "raw_signals/tradingview/archive"
+    SIGNAL_FILE_PREFIX = "trade_requests"
     
     CORE_ASSET_MAPPING = {
         "BTCUSDT": "BTCUSDT",
@@ -18,6 +21,7 @@ class TradingViewProcessor:
 
     def fetch_signals(self):
         """Main entry point to fetch and process signals."""
+        self._archive_old_files()
         recent_files = self._get_recent_files(self.RAW_SIGNALS_DIR)
         signals = {}
         symbol_dates = {}
@@ -126,6 +130,36 @@ class TradingViewProcessor:
                     "timestamp": line_timestamp,
                 }
         return signals, symbol_dates
+
+    def _archive_old_files(self, days=3):
+        """Archive files older than specified days."""
+        if not os.path.exists(self.ARCHIVE_DIR):
+            os.makedirs(self.ARCHIVE_DIR)
+            
+        cutoff = datetime.now() - timedelta(days=days)
+        
+        for filename in os.listdir(self.RAW_SIGNALS_DIR):
+            # Only process trade request files
+            if not filename.startswith(f'{self.SIGNAL_FILE_PREFIX}_') or filename == 'archive' or filename.startswith('.'):
+                continue
+                
+            file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
+            if not os.path.isfile(file_path):
+                continue
+                
+            file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+            if file_time < cutoff:
+                # Create zip file name with original timestamp
+                zip_filename = f"{os.path.splitext(filename)[0]}.zip"
+                zip_path = os.path.join(self.ARCHIVE_DIR, zip_filename)
+                
+                # Create zip file and add the old file
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    zipf.write(file_path, filename)
+                
+                # Remove the original file
+                os.remove(file_path)
+                print(f"Archived {filename} to {zip_filename}")
 
 # Test Function
 if __name__ == '__main__':

@@ -13,19 +13,24 @@
 raw_signals/*
 
 # But keep the folder structure
-!raw_signals/bittensor/
-!raw_signals/tradingview/
+!raw_signals/*/
 
 # Add a rule to ignore all files in bittensor and tradingview directories
-raw_signals/bittensor/*
-raw_signals/tradingview/*
+raw_signals/*/*
 
 # Ensure .gitkeep (or any placeholder) is included to keep the directory structure
-!raw_signals/bittensor/.gitkeep
-!raw_signals/tradingview/.gitkeep
+!raw_signals/*/.gitkeep
 __pycache__/
 **.pyc
 **/credentials.json
 **/signal_weight_config.json
 **/*.pyc
 account_asset_depths.json
+
+# Raw signals files
+raw_signals/*/*.log
+raw_signals/*/*.json
+raw_signals/*/archive/*.zip
+
+# Keep the archive directories
+!raw_signals/*/archive/.gitkeep

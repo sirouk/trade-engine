@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 import sys
 import json
+from signal_processors.tradingview_processor import TradingViewProcessor
 
 
 def setup_domain(domain_name):
@@ -102,6 +103,8 @@ def setup_domain(domain_name):
 # FastAPI app
 app = FastAPI()
 
+# Get the signal file prefix from the processor
+SIGNAL_FILE_PREFIX = TradingViewProcessor.SIGNAL_FILE_PREFIX
 
 @app.post("/")
 async def tradingview_webhook(request: Request):
@@ -116,7 +119,7 @@ async def tradingview_webhook(request: Request):
     # Store logs in a secure directory
     log_dir = Path("raw_signals", "tradingview")
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file_path = log_dir / f"trade_requests_{datetime.datetime.now().strftime('%Y-%m-%d')}.log"
+    log_file_path = log_dir / f"{SIGNAL_FILE_PREFIX}_{datetime.datetime.now().strftime('%Y-%m-%d')}.log"
     with open(log_file_path, "a") as log_file:
         log_file.write(log_entry)
 

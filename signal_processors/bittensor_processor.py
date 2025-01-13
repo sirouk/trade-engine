@@ -2,13 +2,16 @@ import asyncio
 import aiohttp
 import ujson
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from config.credentials import load_bittensor_credentials
 from core.bittensor_signals import BTTSN8MinerSignal, BTTSN8Position, BTTSN8Order, BTTSN8TradePair
+import zipfile
 
 class BittensorProcessor:
     SIGNAL_SOURCE = "bittensor"
     RAW_SIGNALS_DIR = "raw_signals/bittensor"
+    ARCHIVE_DIR = "raw_signals/bittensor/archive"
+    SIGNAL_FILE_PREFIX = "bittensor_signal"
     
     CORE_ASSET_MAPPING = {
         "BTCUSD": "BTCUSDT",
@@ -25,6 +28,7 @@ class BittensorProcessor:
         
     async def fetch_signals(self):
         """Main entry point to fetch and process signals."""
+        self._archive_old_files()
         positions_data = await self._fetch_raw_signals()
         if positions_data:
             self._store_signal_on_disk(positions_data)
@@ -49,8 +53,8 @@ class BittensorProcessor:
         if not os.path.exists(self.RAW_SIGNALS_DIR):
             os.makedirs(self.RAW_SIGNALS_DIR)
         
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"bittensor_signal_{timestamp}.json"
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{self.SIGNAL_FILE_PREFIX}_{timestamp}.json"
         file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
         
         with open(file_path, 'w') as f:
@@ -230,6 +234,36 @@ class BittensorProcessor:
                         cost_basis   = 0.0  # or keep if you have a special reason not to reset
 
         return net_position, cost_basis
+
+    def _archive_old_files(self, days=3):
+        """Archive files older than specified days."""
+        if not os.path.exists(self.ARCHIVE_DIR):
+            os.makedirs(self.ARCHIVE_DIR)
+            
+        cutoff = datetime.now() - timedelta(days=days)
+        
+        for filename in os.listdir(self.RAW_SIGNALS_DIR):
+            # Only process bittensor signal files
+            if not filename.startswith(f'{self.SIGNAL_FILE_PREFIX}_') or filename == 'archive' or filename.startswith('.'):
+                continue
+            
+            file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
+            if not os.path.isfile(file_path):
+                continue
+            
+            file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+            if file_time < cutoff:
+                # Create zip file name with original timestamp
+                zip_filename = f"{os.path.splitext(filename)[0]}.zip"
+                zip_path = os.path.join(self.ARCHIVE_DIR, zip_filename)
+                
+                # Create zip file and add the old file
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    zipf.write(file_path, filename)
+                
+                # Remove the original file
+                os.remove(file_path)
+                print(f"Archived {filename} to {zip_filename}")
 
 # Example standalone usage
 if __name__ == '__main__':
