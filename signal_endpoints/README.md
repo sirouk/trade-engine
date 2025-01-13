@@ -77,3 +77,31 @@ pm2 set pm2-logrotate:compress true
 # Set rotation interval to every 6 hours
 pm2 set pm2-logrotate:rotateInterval '00 */6 * * *'
 ```
+
+### Other examples of trades (long, long again, exit, short, short again, exit) in curl
+
+
+Long:
+```bash
+# long
+curl -X POST -H "Content-Type: application/json" -d '{"symbol": "ETHUSDT", "direction": "long", "action": "buy", "leverage": "3", "size": "5.8/100", "priority": "high", "takeprofit": "0.0", "trailstop": "0.0", "price": "3328.25"}' http://localhost:8000/
+
+# long again
+curl -X POST -H "Content-Type: application/json" -d '{"symbol": "ETHUSDT", "direction": "long", "action": "buy", "leverage": "3", "size": "7.5/100", "priority": "high", "takeprofit": "0.0", "trailstop": "0.0", "price": "3315.33"}' http://localhost:8000/
+
+# exit
+curl -X POST -H "Content-Type: application/json" -d '{"symbol": "ETHUSDT", "direction": "flat", "action": "sell", "leverage": "", "size": "Exit @ 3263.55", "priority": "high", "takeprofit": "0.00", "trailstop": "0.00", "price": "3263.55"}' http://localhost:8000/
+```
+
+Short:
+```bash
+# short
+curl -X POST -H "Content-Type: application/json" -d '{"symbol": "ETHUSDT", "direction": "short", "action": "sell", "leverage": "3", "size": "5.8/100", "priority": "high", "takeprofit": "0.0", "trailstop": "0.0", "price": "3365.25"}' http://localhost:8000/
+
+# short again
+curl -X POST -H "Content-Type: application/json" -d '{"symbol": "ETHUSDT", "direction": "short", "action": "sell", "leverage": "3", "size": "7.5/100", "priority": "high", "takeprofit": "0.0", "trailstop": "0.0", "price": "3375.33"}' http://localhost:8000/
+
+# exit
+curl -X POST -H "Content-Type: application/json" -d '{"symbol": "ETHUSDT", "direction": "flat", "action": "buy", "leverage": "", "size": "Exit @ 3245.55", "priority": "high", "takeprofit": "0.00", "trailstop": "0.00", "price": "3245.55"}' http://localhost:8000/
+```
+
