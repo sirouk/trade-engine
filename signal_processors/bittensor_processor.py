@@ -12,7 +12,8 @@ class BittensorProcessor:
     
     CORE_ASSET_MAPPING = {
         "BTCUSD": "BTCUSDT",
-        "ETHUSD": "ETHUSDT"
+        "ETHUSD": "ETHUSDT",
+        "ADAUSD": "ADAUSDT"
     }
     
     LEVERAGE_LIMIT_CRYPTO = 0.5
