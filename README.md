@@ -1,4 +1,6 @@
-# trade-engine
+# Trade Engine
+
+This is a trade engine that uses signals from various sources to execute trades on various exchanges. This is to be used for testing and development purposes. Use at your own risk.
 
 ### Installation
 
@@ -100,59 +102,59 @@ python3 config/signal_weights.py
 
 You'll be prompted to configure each trading pair:
 
-1. Set the leverage (1-20) for each symbol:
+1. Set the leverage (1-20) for each symbol. If previously configured, the current value will be shown as default:
    ```
    Configuring BTCUSDT
-   Enter leverage for BTCUSDT: 3
+   Enter leverage for BTCUSDT (press Enter for current value: 3): 
    ```
 
-2. Assign weights to each signal source (weights must sum to ≤ 1.0):
+2. Assign weights to each signal source (weights must sum to ≤ 1.0). Previously configured weights will be shown as defaults:
    ```
-   Assign weight for BTCUSDT from tradingview (remaining weight: 1.00, press Enter to skip): 0.10
-   Assign weight for BTCUSDT from bittensor (remaining weight: 0.90, press Enter to skip): 0.15
+   Assign weight for BTCUSDT from tradingview (remaining weight: 1.00, press Enter for current value: 0.10): 
+   Assign weight for BTCUSDT from bittensor (remaining weight: 0.90, press Enter for current value: 0.15): 
    ```
 
-The configuration will be saved to `signal_weight_config.json`. Here's an example:
+The configuration will be saved to `signal_weight_config.json`. After configuration, a summary will be displayed showing all allocated weights and leverage values. Here's an example configuration file:
 
 ```json
-{
-    [
-        {
-            "symbol": "BTCUSDT",
-            "leverage": 3,
-            "sources": [
-                {
-                    "source": "tradingview",
-                    "weight": 0.1
-                },
-                {
-                    "source": "bittensor",
-                    "weight": 0.15
-                }
-            ]
-        },
-        {
-            "symbol": "ETHUSDT",
-            "leverage": 3,
-            "sources": [
-                {
-                    "source": "tradingview",
-                    "weight": 0.1
-                },
-                {
-                    "source": "bittensor",
-                    "weight": 0.15
-                }
-            ]
-        }
-    ]
-}
+[
+    {
+        "symbol": "BTCUSDT",
+        "leverage": 3,
+        "sources": [
+            {
+                "source": "tradingview",
+                "weight": 0.1
+            },
+            {
+                "source": "bittensor",
+                "weight": 0.15
+            }
+        ]
+    },
+    {
+        "symbol": "ETHUSDT",
+        "leverage": 3,
+        "sources": [
+            {
+                "source": "tradingview",
+                "weight": 0.1
+            },
+            {
+                "source": "bittensor",
+                "weight": 0.15
+            }
+        ]
+    }
+]
 ```
 
 - A weight of 0.0 or skipping a source disables it for that symbol
 - Weights represent the influence of each signal source
 - Total weights per symbol should not exceed 1.0
 - Higher leverage increases position sizes proportionally
+- Previously configured values can be kept by pressing Enter
+- A summary of all configurations will be displayed after setup
 
 To update either configuration later, simply rerun the respective configuration script.
 
