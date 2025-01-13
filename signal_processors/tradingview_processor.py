@@ -9,6 +9,7 @@ class TradingViewProcessor:
     CORE_ASSET_MAPPING = {
         "BTCUSDT": "BTCUSDT",
         "ETHUSDT": "ETHUSDT",
+        "ADAUSDT": "ADAUSDT",
     }
 
     def __init__(self, *, enabled=True):
