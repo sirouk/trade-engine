@@ -26,7 +26,7 @@ fi
 Then clone the repository:
 
 ```bash
-cd ~/
+cd $HOME
 git clone https://github.com/sirouk/trade-engine
 cd ./trade-engine
 ```
@@ -44,7 +44,7 @@ You should now have all required dependencies from the `pyproject.toml`.
 If you need to cleanup and reinstall packages:
 
 ```bash
-cd ~/trading-engine
+cd $HOME/trading-engine
 deactivate;
 rm -rf .venv
 ```
@@ -98,6 +98,8 @@ You'll be prompted for the following credentials:
 The trade engine uses weights to determine how much influence each signal source has for each trading pair. Run the configuration script:
 
 ```bash
+cd $HOME/trading-engine
+source .venv/bin/activate
 python3 config/signal_weights.py
 ```
 
@@ -166,6 +168,8 @@ To update either configuration later, simply rerun the respective configuration 
 First, run the trade engine manually to verify everything is working:
 
 ```bash
+cd $HOME/trading-engine
+source .venv/bin/activate
 python3 execute_trades.py
 ```
 
