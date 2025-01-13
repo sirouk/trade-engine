@@ -167,11 +167,10 @@ class KuCoin:
 
         # Check if the response contains the desired symbol
         if instrument["symbol"] == symbol:
-            #print(f"Instrument: {instrument}")
-            lot_size = float(instrument["multiplier"])  # Lot size (e.g., 1)
-            min_lots = float(instrument["lotSize"])  # Minimum order size in lots
-            tick_size = float(instrument["tickSize"])  # Tick size for price (e.g., 0.1)
-            contract_value = float(instrument["multiplier"])  # Contract value (e.g., 0.001 BTC per lot)
+            lot_size = float(instrument["lotSize"])      # Use lotSize instead of multiplier
+            min_lots = float(instrument["lotSize"])      # Minimum order size in lots
+            tick_size = float(instrument["tickSize"])    # Tick size for price
+            contract_value = float(instrument["multiplier"])  # Contract value/multiplier
 
             return lot_size, min_lots, tick_size, contract_value
         raise ValueError(f"Symbol {symbol} not found.")
@@ -322,7 +321,7 @@ class KuCoin:
             # Scale the target size to match exchange requirements
             #if size != 0:
             # Always scale as we need lot_size
-            size, _, lot_size = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)  # No price needed for market orders
+            size, _, lot_size = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
 
             # Initialize position state variables
             current_size = current_position.size if current_position else 0
@@ -331,15 +330,15 @@ class KuCoin:
 
             # Determine if we need to close the current position before opening a new one
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
-                print(f"Flipping position from {current_size} to {size}. Closing current position.")
+                print(f"Flipping position from {current_size} to {size}. Closing current position first.")
                 await self.close_position(symbol)  # Close the current position
                 current_size = 0 # Update current size to 0 after closing the position
 
             # Check for margin mode or leverage changes
             if current_size != 0 and size != 0:
                 if current_margin_mode != margin_mode:
-
-                    print(f"Closing position to modify margin mode to {margin_mode}.")
+                    print(f"\nMargin mode change needed: {current_margin_mode} → {margin_mode}")
+                    print("Closing position to modify margin mode")
                     await self.close_position(symbol)  # Close the current position
                     current_size = 0 # Update current size to 0 after closing the position
 
@@ -355,8 +354,9 @@ class KuCoin:
 
                 # if the leverage is not within a 10% tolerance, close the position
                 if current_leverage > 0 and abs(current_leverage - leverage) > 0.10 * leverage and current_size != 0:
+                    print(f"\nLeverage change needed: {current_leverage} → {leverage}")
                     print("KuCoin does not allow adjustment for leverage on an open position.")
-                    print(f"Closing position to modify leverage from {current_leverage} to {leverage}.")
+                    print("Closing position to modify leverage")
                     await self.close_position(symbol)  # Close the current position
                     current_size = 0 # Update current size to 0 after closing the position
 
