@@ -7,6 +7,7 @@ This is a trade engine that uses signals from various sources to execute trades 
 The trade engine requires Python 3.11+ and some system dependencies:
 
 ```bash
+# Install python 3.11
 sudo add-apt-repository ppa:deadsnakes/ppa
 sudo apt update
 sudo apt install -y python3.11 python3.11-venv
