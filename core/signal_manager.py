@@ -89,7 +89,7 @@ class SignalManager:
         # Reload config each time to catch changes
         self.config = self._load_config()
         
-        logger.info("\n=== Signal Source Depths ===")
+        #logger.info("\n=== Signal Source Depths ===")
         # If no accounts provided, use all known account processors
         accounts_to_check = accounts if accounts is not None else self.account_processors.values()
         
@@ -116,8 +116,8 @@ class SignalManager:
                 signals = processor.fetch_signals()
                 prev_signals = self.previous_signals.get(source, {})
                 
-                logger.info(f"Current signals for {source}: {signals}")
-                logger.info(f"Previous signals for {source}: {prev_signals}")
+                #logger.info(f"Current signals for {source}: {signals}")
+                #logger.info(f"Previous signals for {source}: {prev_signals}")
                 
                 # Make sure signal.leverage is set for all signals according to self.config
                 source_has_updates = False
@@ -145,7 +145,7 @@ class SignalManager:
                 logger.info(f"Source {source} is disabled, using zero depths")
                 current_signals[source] = {}
         
-        logger.info("\n=== Weighted Asset Depths ===")
+        #logger.info("\n=== Weighted Asset Depths ===")
         # Calculate weighted depths for each asset
         asset_depths = {}  # {asset: weighted_depth}
         for symbol_config in self.config:
@@ -153,7 +153,7 @@ class SignalManager:
             total_weight = 0
             weighted_sum = 0
             
-            logger.info(f"\n{symbol} weights:")
+            #logger.info(f"\n{symbol} weights:")
             for source_config in symbol_config['sources']:
                 source = source_config['source']
                 weight = source_config['weight']
@@ -166,15 +166,15 @@ class SignalManager:
                     # depth (e.g. 0.0235) defines what portion of that allocation to use
                     weighted_sum += depth * weight
                     total_weight += weight
-                    logger.info(f"  {source}: depth={depth}, weight={weight}")
+                    #logger.info(f"  {source}: depth={depth}, weight={weight}")
             
             if total_weight > 0:
                 # Final depth represents margin allocation relative to account value
                 #asset_depths[symbol] = weighted_sum / total_weight
                 asset_depths[symbol] = weighted_sum
-                logger.info(f"  Combined depth: {asset_depths[symbol]}")
+                #logger.info(f"  Combined depth: {asset_depths[symbol]}")
         
-        logger.info("\n=== Account Asset Depths ===")
+        #logger.info("\n=== Account Asset Depths ===")
         # Check each account for changes
         #has_updates = False
         for account_name in all_account_names:
@@ -182,7 +182,6 @@ class SignalManager:
             is_enabled = account.enabled if account else False
             current_depths = self.account_asset_depths.get(account_name, {})
             
-            logger.info(f"\n{account_name} depths:")
             for asset, new_depth in asset_depths.items():
                 current_depth = current_depths.get(asset, 0)
                 target_depth = new_depth if is_enabled else 0
@@ -191,8 +190,8 @@ class SignalManager:
                 current_depth = float(current_depth)
                 target_depth = float(target_depth)
                 
-                logger.info(f"  {asset}: current={current_depth}, target={target_depth}")
                 if current_depth != target_depth:
+                    logger.info(f"Depth change detected for {account_name} on {asset}: current={current_depth}, target={target_depth}")
                     has_updates = True
                     new_depths[account_name][asset] = target_depth
                     # Mark all sources for this asset as needing updates
@@ -206,7 +205,7 @@ class SignalManager:
             logger.info(f"Updates needed: {new_depths}")
         else:
             self._temp_depths = self.account_asset_depths  # Use current depths if no updates
-            logger.info("No depth changes detected")
+            #logger.info("No depth changes detected")
         
         return updates
     

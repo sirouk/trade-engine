@@ -50,8 +50,8 @@ class TradingViewProcessor:
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
-                    # Skip comment lines
-                    if line.strip().startswith('#'):
+                    # Skip comment lines or empty lines
+                    if line.strip().startswith('#') or line.strip() == '':
                         if self.verbose:
                             print(f"Skipping comment line: {line.strip()}")
                         continue

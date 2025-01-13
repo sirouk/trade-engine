@@ -21,76 +21,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class ExchangeLogger:
-    def __init__(self, exchange_name: str, base_logger):
-        self.exchange_name = exchange_name
-        self.base_logger = base_logger
-        
-        # Create handler and formatter if none exist
-        if not base_logger.handlers:
-            handler = logging.StreamHandler()
-            self.base_logger.addHandler(handler)
-            
-        # Store original formatter
-        self.original_formatter = self.base_logger.handlers[0].formatter or logging.Formatter('%(message)s')
-        
-        # Create new formatter that includes exchange name
-        self.exchange_formatter = logging.Formatter(
-            f'%(asctime)s - %(levelname)s - [{exchange_name}] %(message)s',
-            datefmt='%Y-%m-%d %I:%M:%S %p'
-        )
-        
-        # Store original print and logging functions
-        self.original_print = print
-        self.original_logger = None
-        self.handlers = self.base_logger.handlers  # Add this to make ExchangeLogger look like a logger
-        
-    def __enter__(self):
-        """Set up the logger context"""
-        global print, logger
-        self.original_logger = logger
-        logger = self
-        
-        # Override print to include exchange name
-        def exchange_print(*args, **kwargs):
-            msg = " ".join(str(arg) for arg in args)
-            # Don't prefix separator lines
-            if msg.strip() and not all(c == '=' for c in msg.strip()):
-                self.info(msg)
-            else:
-                self.original_print(msg)
-        self.original_print_func = print
-        print = exchange_print
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Restore original logging and print"""
-        global print, logger
-        logger = self.original_logger
-        print = self.original_print_func
-
-    def _log(self, level: str, msg: str):
-        """Internal method to handle logging with formatter swap."""
-        handler = self.base_logger.handlers[0]
-        handler.setFormatter(self.exchange_formatter)
-        # Don't prefix separator lines
-        if msg.strip() and not all(c == '=' for c in msg.strip()):
-            getattr(self.base_logger, level)(msg)
-        else:
-            handler.setFormatter(self.original_formatter)
-            getattr(self.base_logger, level)(msg)
-        handler.setFormatter(self.original_formatter)
-
-    def info(self, msg: str):
-        self._log('info', msg)
-
-    def error(self, msg: str):
-        self._log('error', msg)
-
-    def warning(self, msg: str):
-        self._log('warning', msg)
-
 class TradeExecutor:
+    sleep_time = 0.5
+    
     def _load_weight_config(self) -> bool:
         """Load signal weight configuration from file. Returns True if successful."""
         try:
@@ -132,27 +65,23 @@ class TradeExecutor:
             MEXC()
         ]
         
-        # Create a global logger for non-account-specific logs
-        self.global_logger = ExchangeLogger("Global", logger)
-        
     async def get_signals(self) -> Dict:
         """Fetch and combine signals from all sources."""
-        with self.global_logger:
-            try:
-                # Check for updates in signal sources
-                updates = self.signal_manager.check_for_updates(self.accounts)
-                logger.info(f"Checking for updates: {updates}")
+        try:
+            # Check for updates in signal sources
+            updates = self.signal_manager.check_for_updates(self.accounts)
+            logger.info(f"Checking for updates: {updates}")
+            
+            # Get the new depths that need to be applied
+            if hasattr(self.signal_manager, '_temp_depths'):
+                return self.signal_manager._temp_depths
                 
-                # Get the new depths that need to be applied
-                if hasattr(self.signal_manager, '_temp_depths'):
-                    return self.signal_manager._temp_depths
-                    
-                logger.info("No depth changes detected")
-                return {}
-                
-            except Exception as e:
-                logger.error(f"Error fetching signals: {str(e)}")
-                return {}
+            logger.info("No depth changes detected")
+            return {}
+            
+        except Exception as e:
+            logger.error(f"Error fetching signals: {str(e)}")
+            return {}
 
     async def process_account(self, account, signals: Dict):
         """Process signals for a specific account."""
@@ -237,23 +166,14 @@ class TradeExecutor:
             logger.error(error_msg)
             return False, error_msg
 
-    async def process_account_with_prefix(self, account, signals: Dict):
-        """Wrapper that adds exchange prefix to all logging output."""
-        exchange_logger = ExchangeLogger(account.exchange_name, logger)
-        
-        with exchange_logger:
-            return await self.process_account(account, signals)
-
     async def execute(self):
         """Execute trades based on signal changes."""
         try:
-            # Check for updates
             updates = self.signal_manager.check_for_updates(self.accounts)
-            logger.info(f"Checking for updates: {updates}")
+            #logger.info(f"Checking for updates: {updates}")
             
             # If no updates needed, skip execution
             if not any(updates.values()):
-                logger.info("No signal changes detected, skipping execution")
                 return True
                 
             # Get signals that need to be executed
@@ -263,7 +183,7 @@ class TradeExecutor:
             tasks: List[asyncio.Task] = []
             for account in self.accounts:
                 task = asyncio.create_task(
-                    self.process_account_with_prefix(account, signals)
+                    self.process_account(account, signals)
                 )
                 tasks.append(task)
             
@@ -385,23 +305,18 @@ async def execute_trades(accounts, signals):
 
 async def main():
     executor = TradeExecutor()
+    logger.info(f"Starting execution cycle at {datetime.now()}")
     while True:
-        with executor.global_logger:
-            try:
-                now = datetime.now()
-                logger.info(f"Starting execution cycle at {now}")
-                
-                # Execute trades
-                await executor.execute()
-                
-                # Wait for next cycle
-                logger.info("Execution complete, waiting for next cycle...")
-                
-            except Exception as e:
-                logger.error(f"Error in main loop: {str(e)}")
-                time.sleep(60)  # Wait a minute before retrying on error
+        try:
+            # Execute trades
+            await executor.execute()
+            logger.info("Execution complete, waiting for next cycle...")
             
-            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error in main loop: {str(e)}")
+            time.sleep(5)
+        
+        time.sleep(executor.sleep_time)
 
 if __name__ == "__main__":
     asyncio.run(main()) 
