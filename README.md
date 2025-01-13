@@ -56,6 +56,8 @@ Before running the trade engine, you'll need to configure your exchange API cred
 To set up the credentials, run the following command, which will prompt you to enter your API key(s):
 
 ```bash
+cd $HOME/trading-engine
+source .venv/bin/activate
 python3 config/credentials.py
 ```
 
