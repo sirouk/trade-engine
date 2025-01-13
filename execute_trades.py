@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Dict
+from typing import Dict, List, Tuple
 import logging
 from datetime import datetime
 from collections import defaultdict
@@ -259,15 +259,33 @@ class TradeExecutor:
             # Get signals that need to be executed
             signals = self.signal_manager._temp_depths
             
-            # Process each account
+            # Process all accounts concurrently
+            tasks: List[asyncio.Task] = []
             for account in self.accounts:
-                success, error = await self.process_account_with_prefix(account, signals)
+                task = asyncio.create_task(
+                    self.process_account_with_prefix(account, signals)
+                )
+                tasks.append(task)
+            
+            # Wait for all account processing to complete
+            results: List[Tuple[bool, str]] = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results and confirm executions
+            all_successful = True
+            for account, result in zip(self.accounts, results):
+                if isinstance(result, Exception):
+                    logger.error(f"Error processing {account.exchange_name}: {str(result)}")
+                    all_successful = False
+                    continue
+                    
+                success, error = result
                 if success:
                     self.signal_manager.confirm_execution(account.exchange_name, True)
                 else:
                     logger.error(f"Error processing {account.exchange_name}: {error}")
+                    all_successful = False
             
-            return True
+            return all_successful
             
         except Exception as e:
             logger.error(f"Error in execute: {str(e)}")
