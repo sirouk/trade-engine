@@ -43,12 +43,24 @@ class ByBit:
                 settleCoin=self.SETTLE_COIN,
                 coin=instrument
             )
-            # {'retCode': 0, 'retMsg': 'OK', 'result': {'list': [{'totalEquity': '0.10204189', 'accountIMRate': '0', 'totalMarginBalance': '0.09302213', 'totalInitialMargin': '0', 'accountType': 'UNIFIED', 'totalAvailableBalance': '0.09302213', 'accountMMRate': '0', 'totalPerpUPL': '0', 'totalWalletBalance': '0.09302213', 'accountLTV': '0', 'totalMaintenanceMargin': '0', 'coin': [{'availableToBorrow': '', 'bonus': '0', 'accruedInterest': '0', 'availableToWithdraw': '0.09304419', 'totalOrderIM': '0', 'equity': '0.09304419', 'totalPositionMM': '0', 'usdValue': '0.09302213', 'unrealisedPnl': '0', 'collateralSwitch': True, 'spotHedgingQty': '0', 'borrowAmount': '0.000000000000000000', 'totalPositionIM': '0', 'walletBalance': '0.09304419', 'cumRealisedPnl': '-10924.04925374', 'locked': '0', 'marginCollateral': True, 'coin': 'USDT'}]}]}, 'retExtInfo': {}, 'time': 1728795935267}
+            # {'retCode': 0, 'retMsg': 'OK', 'result': {'list': [{'totalEquity': '12533.29873097', 'accountIMRate': '', 'totalMarginBalance': '', 'totalInitialMargin': '', 'accountType': 'UNIFIED', 'totalAvailableBalance': '', 'accountMMRate': '', 'totalPerpUPL': '0', 'totalWalletBalance': '12533.29873097', 'accountLTV': '', 'totalMaintenanceMargin': '', 'coin': [{'availableToBorrow': '', 'bonus': '0', 'accruedInterest': '0', 'availableToWithdraw': '', 'totalOrderIM': '0', 'equity': '12534.90748258', 'totalPositionMM': '0', 'usdValue': '12533.29047951', 'unrealisedPnl': '0', 'collateralSwitch': True, 'spotHedgingQty': '0', 'borrowAmount': '0', 'totalPositionIM': '0', 'walletBalance': '12534.90748258', 'cumRealisedPnl': '0', 'locked': '0', 'marginCollateral': True, 'coin': 'USDT'}]}]}, 'retExtInfo': {}, 'time': 1737052109973}
+            
+            # print response
+            # print(f"Balance Response: {balance}")
+            # quit()
             
             # get coin balance available to trade
-            balance = balance["result"]["list"][0]["coin"][0]["availableToWithdraw"]
-            print(f"Account Balance for {instrument}: {balance}")
-            return balance
+            #balance = balance["result"]["list"][0]["coin"][0]["walletBalance"]
+            coin_data = balance["result"]["list"][0]["coin"][0]
+            wallet_balance = float(coin_data["walletBalance"])
+            position_im = float(coin_data["totalPositionIM"])
+            
+            # Available Balance = Wallet Balance - Initial Margin
+            available_balance = wallet_balance - position_im
+            
+            print(f"Available Balance for {instrument}: {available_balance}")
+            return available_balance
+            
         except Exception as e:
             print(f"Error fetching balance: {str(e)}")
             
@@ -499,7 +511,7 @@ class ByBit:
         # Bybit uses the same format as our signals, no conversion needed
         return signal_symbol
 
-    async def fetch_total_account_value(self) -> float:
+    async def fetch_initial_account_value(self) -> float:
         """Calculate total account value from balance and initial margin of positions."""
         try:
             # Get available balance
@@ -512,15 +524,18 @@ class ByBit:
             position_margin = 0.0
             if positions and "result" in positions:
                 for pos in positions["result"]["list"]:
-                    position_margin += float(pos["positionIM"])  # Direct initial margin value
+                    # print(f"Position: {pos}")
+                    # quit()
+                    #position_margin += float(pos["positionIM"])  # Direct initial margin value
+                    position_margin += float(pos["positionBalance"])  # Direct initial margin value
             print(f"Position Initial Margin: {position_margin} USDT")
             
             total_value = available_balance + position_margin
-            print(f"ByBit Total Account Value: {total_value} USDT")
+            print(f"ByBit Initial Account Value: {total_value} USDT")
             return total_value
             
         except Exception as e:
-            print(f"Error calculating total account value: {str(e)}")
+            print(f"Error calculating initial account value: {str(e)}")
             return 0.0
 
 
@@ -573,10 +588,10 @@ async def main():
     # Test symbol formats
     # await bybit.test_symbol_formats()
     
-    # Test total account value calculation
-    print("\nTesting total account value calculation:")
-    total_value = await bybit.fetch_total_account_value()
-    print(f"Final Total Account Value: {total_value} USDT")
+    # Test initial account value calculation
+    print("\nTesting initial account value calculation:")
+    initial_value = await bybit.fetch_initial_account_value()
+    print(f"Final Initial Account Value: {initial_value} USDT")
     
     # End time
     end_time = datetime.datetime.now()
