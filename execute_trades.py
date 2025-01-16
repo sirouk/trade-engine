@@ -105,7 +105,7 @@ class TradeExecutor:
                 return True, None
                 
             # Get total account value (including positions)
-            total_value = await account.fetch_total_account_value()
+            total_value = await account.fetch_initial_account_value()
             if not total_value:
                 logger.warning(f"No account value found for {account.exchange_name}")
                 return False, "No account value found"
@@ -217,7 +217,7 @@ async def calculate_trade_amounts(accounts, signals):
         # Get total account values using new methods
         account_values = {}
         for account in accounts:
-            total_value = await account.fetch_total_account_value()
+            total_value = await account.fetch_initial_account_value()
             account_values[account.exchange_name] = total_value
             
         print("\nAccount Values:")

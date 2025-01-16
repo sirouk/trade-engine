@@ -434,7 +434,7 @@ class KuCoin:
             return f"{base}USDTM"
         return signal_symbol
 
-    async def fetch_total_account_value(self) -> float:
+    async def fetch_initial_account_value(self) -> float:
         """Calculate total account value from balance and initial margin of positions."""
         try:
             # Get available balance
@@ -454,11 +454,11 @@ class KuCoin:
             print(f"Position Initial Margin: {position_margin} USDT")
             
             total_value = available_balance + position_margin
-            print(f"KuCoin Total Account Value: {total_value} USDT")
+            print(f"KuCoin Initial Account Value: {total_value} USDT")
             return total_value
             
         except Exception as e:
-            print(f"Error calculating total account value: {str(e)}")
+            print(f"Error calculating initial account value: {str(e)}")
             return 0.0
 
 
@@ -515,7 +515,7 @@ async def main():
     
     # Test total account value calculation
     print("\nTesting total account value calculation:")
-    total_value = await kucoin.fetch_total_account_value()
+    total_value = await kucoin.fetch_initial_account_value()
     print(f"Final Total Account Value: {total_value} USDT")
     
     # End time
