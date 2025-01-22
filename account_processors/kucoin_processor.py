@@ -10,7 +10,6 @@ from core.utils.execute_timed import execute_with_timeout
 
 class KuCoin:
     def __init__(self):
-        
         self.exchange_name = "KuCoin"
         self.enabled = True
         
@@ -231,7 +230,6 @@ class KuCoin:
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True, adjust_margin_mode: bool = True):
         """Open a position with a market order on KuCoin Futures."""
         try:
-            
             print(f"HERE: Opening a {side} position for {size} lots of {symbol} with {leverage}x leverage.")
             
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -259,14 +257,13 @@ class KuCoin:
                     
             print(f"Placing a market order for {lots} lots of {symbol} with {kucoin_margin_mode} margin mode and {leverage}x leverage.")
             
-
-            # Place the market order
+            # Place the market order with size in contracts
             order = await execute_with_timeout(
                 self.trade_client.create_market_order,
                 timeout=5,
                 symbol=symbol,
                 side=side.lower(),
-                size=lots,
+                size=lots,  # KuCoin expects size in contracts, already handled by scale_size_and_price
                 lever=leverage,
                 marginMode=kucoin_margin_mode,
                 clientOid=client_oid

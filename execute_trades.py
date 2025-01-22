@@ -127,17 +127,20 @@ class TradeExecutor:
 
                 price = ticker.last  # Use last price from ticker
 
-                # Calculate position value in USDT
-                position_value = total_value * depth
-                
-                # Calculate raw quantity
-                quantity = abs(position_value) / price
+                # Calculate position value in USDT (this will be our margin)
+                position_value = total_value * depth  # depth is already weighted (0.0145)
+
+                # Calculate raw quantity based on leverage
+                leverage = symbol_config.get('leverage', 1)
+                notional_value = position_value * leverage  # Total position value including leverage
+                quantity = notional_value / price  # Convert to asset quantity
+
                 if depth < 0:
                     quantity = -quantity
-                    
-                leverage = symbol_config.get('leverage', 1)
-                
-                quantity = quantity * leverage
+
+                logger.info(f"Account Value: {total_value}, Depth: {depth}, "
+                           f"Position Value: {position_value}, Leverage: {leverage}, "
+                           f"Notional Value: {notional_value}, Quantity: {quantity}")
 
                 # Get symbol details to log the precision/lot requirements
                 symbol_details = await account.get_symbol_details(exchange_symbol)
@@ -154,7 +157,7 @@ class TradeExecutor:
                 # Let reconcile_position handle the quantity precision
                 await account.reconcile_position(
                     symbol=exchange_symbol,
-                    size=quantity,  # Pass raw quantity, let exchange-specific logic handle precision
+                    size=quantity,
                     leverage=leverage,
                     margin_mode="isolated"
                 )
