@@ -1,9 +1,7 @@
-import json
-import asyncio
+import ujson as json
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import TradingViewProcessor
 from signal_processors.bittensor_processor import BittensorProcessor
-from collections import defaultdict
 
 CONFIG_FILE = "signal_weight_config.json"
 STARTING_WEIGHT = 1.0
@@ -36,7 +34,7 @@ def load_signal_sources():
 def load_existing_config():
     """Load existing configuration if available."""
     try:
-        with open(CONFIG_FILE, 'r') as f:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
             configs = []
             for config in config_data:
@@ -92,7 +90,7 @@ def configure_signals(signal_sources):
 
     # Build unified symbol mappings
     for source in signal_sources:
-        for key, unified_symbol in source.core_asset_mapping.items():
+        for _, unified_symbol in source.core_asset_mapping.items():
             if unified_symbol not in unified_symbols:
                 unified_symbols[unified_symbol] = []
             unified_symbols[unified_symbol].append(source.name)
@@ -154,7 +152,7 @@ def save_config(asset_configs):
 
     print_summary(asset_configs)
 
-    with open(CONFIG_FILE, 'w') as f:
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config_data, f, indent=4)
     print(f"\nConfiguration saved to {CONFIG_FILE}")
 

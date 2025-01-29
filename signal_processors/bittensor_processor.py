@@ -4,7 +4,6 @@ import ujson
 import os
 from datetime import datetime, timedelta
 from config.credentials import load_bittensor_credentials
-from core.bittensor_signals import BTTSN8MinerSignal, BTTSN8Position, BTTSN8Order, BTTSN8TradePair
 import zipfile
 
 class BittensorProcessor:
@@ -21,10 +20,9 @@ class BittensorProcessor:
     
     LEVERAGE_LIMIT_CRYPTO = 0.5
 
-    def __init__(self, *, enabled=True):
+    def __init__(self, *, enabled=False):
         self.credentials = load_bittensor_credentials()
-        #self.enabled = enabled
-        self.enabled = False
+        self.enabled = enabled
         
     async def fetch_signals(self):
         """Main entry point to fetch and process signals."""
@@ -57,7 +55,7 @@ class BittensorProcessor:
         filename = f"{self.SIGNAL_FILE_PREFIX}_{timestamp}.json"
         file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
         
-        with open(file_path, 'w') as f:
+        with open(file_path, 'w', encoding='utf-8') as f:
             ujson.dump(data, f, indent=4)
 
     def _process_signals(self, data, top_miners=None, mapped_only=True):
@@ -75,7 +73,6 @@ class BittensorProcessor:
 
         # Initialize asset tracking dictionaries
         asset_depths = {}
-        asset_entries = {}
         miner_tracker = []  # Track miners that have been processed
 
         # Iterate through the ranked miners and apply gradient allocations
@@ -115,9 +112,9 @@ class BittensorProcessor:
                 
                 # Skip if the position has no net leverage or is closed
                 if position_data["net_leverage"] == 0 or position_data["is_closed_position"]:
-                   #print(f"Skipping {symbol} as it has no net leverage.")
-                   continue
-                
+                    #print(f"Skipping {symbol} as it has no net leverage.")
+                    continue
+               
                 net_pos, avg_price = self._compute_net_position_and_average_price(position_data["orders"])
                     
                 capped_leverage = min(net_pos, self.LEVERAGE_LIMIT_CRYPTO)
@@ -269,7 +266,7 @@ class BittensorProcessor:
 if __name__ == '__main__':
     # return signals and print them
     processor = BittensorProcessor()
-    signals = asyncio.run(processor.fetch_signals())
-    print(f"Total signals: {len(signals)}") 
-    print(signals)
+    result_signals = asyncio.run(processor.fetch_signals())
+    print(f"Total signals: {len(result_signals)}") 
+    print(result_signals)
     

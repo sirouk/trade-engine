@@ -164,6 +164,6 @@ class TradingViewProcessor:
 # Test Function
 if __name__ == '__main__':
     processor = TradingViewProcessor()
-    signals = processor.fetch_signals()
-    print(f"Total signals: {len(signals)}") 
-    print(signals)
+    result_signals = processor.fetch_signals()
+    print(f"Total signals: {len(result_signals)}") 
+    print(result_signals)

@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 import asyncio
 import numpy as np
-from math import sqrt, log1p, prod
+from math import sqrt
 from signal_processors.bittensor_processor import BittensorProcessor
 import logging
 
@@ -276,7 +276,7 @@ def calculate_miner_scores(data):
 
 # make a function that stores the number of keys to a cache file in the same directory as where the fetch_bittensor_signals() stores the data
 def store_key_count(current_key_count, path):
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(str(current_key_count))
         
 # now make a function that fetches the number of keys from the cache file
@@ -285,7 +285,7 @@ def fetch_key_count(path):
     # if the file does not exist return a -9
     if not os.path.exists(path):
         return -1
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         return int(f.read())
     
 async def get_ranked_miners(assets_to_trade=None):
