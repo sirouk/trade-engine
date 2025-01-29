@@ -47,15 +47,130 @@ class BittensorProcessor:
         self.miner_count_cache_filename = "miner_count_cache.txt"
         self.miner_count_cache_path = os.path.join(self.RAW_SIGNALS_DIR, self.miner_count_cache_filename)
         
-    async def fetch_signals(self):
-        """Main entry point to fetch and process signals."""
-        self._archive_old_files()
+    async def fetch_signals(self, verbose=False):
+        """Fetch and process signals from ranked miners."""
+        # Get raw signals and rank miners
         positions_data = await self._fetch_raw_signals()
-        if positions_data:
-            self._store_signal_on_disk(positions_data)
-            return self._process_signals(positions_data, top_miners=5)
-        print("No data received.")
-        return []
+        if not positions_data:
+            logger.error("Failed to fetch miner data")
+            return {}
+
+        # Check key count
+        previous_key_count = self.fetch_key_count()
+        current_key_count = len(positions_data)
+        if previous_key_count >= 0 and (current_key_count <= 50 or abs(current_key_count - previous_key_count) > 10):
+            logger.error("The number of keys fetched is not within the expected tolerance.")
+            return {}
+        self.store_key_count(current_key_count)
+
+        # Get rankings using all available assets
+        assets_to_trade = list(self.CORE_ASSET_MAPPING.keys())
+        rankings, ranked_miners = self.rank_miners(positions_data, assets_to_trade)
+        if not ranked_miners:
+            logger.error("No qualified miners found")
+            return {}
+
+        if verbose:
+            print("\n=== Qualified Miners ===")
+            for rank, miner in enumerate(ranked_miners, 1):
+                print(f"\nRank #{rank} - Miner: {miner['hotkey']}")
+                print(f"Total Score: {miner['total_score']:.4f}")
+                print(f"Profitability: {miner['percentage_profitable']*100:.2f}%")
+                print(f"Sharpe Ratio: {miner['sharpe_ratio']:.4f}")
+
+        # Calculate gradient allocation weights for miners
+        allocations = self._calculate_gradient_allocation(len(ranked_miners))
+        if verbose:
+            print("\n=== Gradient Allocations ===")
+            for rank, weight in allocations.items():
+                print(f"Rank {rank}: {weight:.4f}")
+
+        # Initialize asset depths
+        asset_depths = {asset: [] for asset in assets_to_trade}
+
+        # Process each ranked miner's positions
+        for rank, miner_data in enumerate(ranked_miners, 1):
+            miner_hotkey = miner_data['hotkey']
+            miner_weight = allocations[rank]  # Get miner's weight based on rank
+            miner_positions = positions_data[miner_hotkey]['positions']
+
+            if verbose:
+                print(f"\n=== Miner {miner_hotkey} (Rank {rank}) Positions ===")
+
+            # Group positions by asset
+            for position in miner_positions:
+                asset = position['trade_pair'][0]
+                if asset not in assets_to_trade:
+                    continue
+
+                # Calculate net leverage for this position
+                orders = position.get("orders", [])
+                net_pos, avg_price = self._compute_net_position_and_average_price(orders)
+                
+                if net_pos != 0:  # Only include non-zero positions
+                    timestamp = max(order['processed_ms'] for order in orders)
+                    weighted_leverage = net_pos * miner_weight
+                    
+                    if verbose:
+                        print(f"\n{asset}:")
+                        print(f"  Net Position: {net_pos:.4f}")
+                        print(f"  Average Price: ${avg_price:.2f}")
+                        print(f"  Trade Count: {len(orders)}")
+                        print(f"  Miner Weight: {miner_weight:.4f}")
+                        print(f"  Weighted Leverage: {weighted_leverage:.4f}")
+                        print(f"  Last Update: {datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    asset_depths[asset].append({
+                        'miner': miner_hotkey,
+                        'weight': miner_weight,
+                        'leverage': net_pos,
+                        'price': avg_price,
+                        'timestamp': timestamp,
+                        'trade_count': len(orders)
+                    })
+
+        # Combine miner positions into final signals
+        signals = {}
+        if verbose:
+            print("\n=== Final Asset Signals ===")
+            
+        for asset, positions in asset_depths.items():
+            if not positions:
+                continue
+
+            # Calculate weighted average leverage and price
+            total_weighted_leverage = sum(pos['leverage'] * pos['weight'] for pos in positions)
+            
+            # Cap the total leverage at 1.0 or -1.0
+            capped_leverage = max(min(total_weighted_leverage, 1.0), -1.0)
+            
+            # Get the most recent timestamp
+            latest_timestamp = max(pos['timestamp'] for pos in positions)
+            
+            # Calculate weighted average price
+            total_weight = sum(abs(pos['leverage'] * pos['weight']) for pos in positions)
+            weighted_price = (
+                sum(pos['price'] * abs(pos['leverage'] * pos['weight']) for pos in positions) / total_weight
+                if total_weight > 0 else 0
+            )
+
+            signals[asset] = {
+                'depth': capped_leverage,
+                'price': weighted_price,
+                'timestamp': latest_timestamp
+            }
+            
+            if verbose:
+                print(f"\n{asset}:")
+                print(f"  Final Depth: {capped_leverage:.4f}")
+                print(f"  Average Price: ${weighted_price:.2f}")
+                print(f"  Contributing Miners: {len(positions)}")
+                print("  Individual Contributions:")
+                for pos in positions:
+                    print(f"    {pos['miner']}: leverage={pos['leverage']:.4f}, "
+                          f"weight={pos['weight']:.4f}, trades={pos['trade_count']}")
+
+        return signals
 
     async def _fetch_raw_signals(self):
         """Fetch raw signals from the API."""
@@ -198,8 +313,7 @@ class BittensorProcessor:
 
         return results
 
-    @staticmethod
-    def _calculate_gradient_allocation(max_rank):
+    def _calculate_gradient_allocation(self, max_rank):
         """Calculate gradient allocation weights."""
         # Total weight is the sum of all rank values
         total_weight = sum(max_rank + 1 - rank for rank in range(1, max_rank + 1))
@@ -211,8 +325,7 @@ class BittensorProcessor:
             allocations[rank] = inverted_rank / total_weight
         return allocations
 
-    @staticmethod
-    def _compute_net_position_and_average_price(orders):
+    def _compute_net_position_and_average_price(self, orders):
         """Compute net position and average price from orders."""
         # Sort chronologically:
         sorted_orders = sorted(orders, key=lambda x: x["processed_ms"])
@@ -222,7 +335,7 @@ class BittensorProcessor:
         
         # if any orders are flat, we will return with zero net position and zero cost basis
         if any(order["order_type"].upper().strip() == "FLAT" for order in sorted_orders):
-            print("Found FLAT order. Resetting net position and cost basis.")
+            #print("Found FLAT order. Resetting net position and cost basis.")
             return net_position, cost_basis
 
         for order in sorted_orders:
@@ -675,10 +788,14 @@ class BittensorProcessor:
 # Example standalone usage
 if __name__ == '__main__':
     # Use the keys from CORE_ASSET_MAPPING
-    assets_to_trade = list(BittensorProcessor.CORE_ASSET_MAPPING.keys())
-    processor = BittensorProcessor(enabled=True)
-    rankings, ranked_miners = asyncio.run(processor.get_ranked_miners(assets_to_trade))
-    if rankings is None:
-        print("Failed to get rankings")
-        exit(1)
+    #assets_to_trade = list(BittensorProcessor.CORE_ASSET_MAPPING.keys())
+    #processor = BittensorProcessor(enabled=True)
+    #rankings, ranked_miners = asyncio.run(processor.get_ranked_miners(assets_to_trade))
+    #if rankings is None:
+    #    print("Failed to get rankings")
+    #    exit(1)
     
+    processor = BittensorProcessor(enabled=True)
+    #resulting_signals = asyncio.run(processor.fetch_signals(verbose=True))
+    resulting_signals = asyncio.run(processor.fetch_signals(verbose=False))
+    print(resulting_signals)
