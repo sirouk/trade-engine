@@ -10,7 +10,14 @@ from math import sqrt
 import logging
 import ujson as json
 
+# Configure logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', '%Y-%m-%d %I:%M:%S %p')
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 class BittensorProcessor:
     SIGNAL_SOURCE = "bittensor"
@@ -221,12 +228,20 @@ class BittensorProcessor:
 
     async def run_signal_loop(self):
         """Main loop for preparing signals at regular intervals."""
+        logger.info("Starting Bittensor signal processor loop")
         while True:
             try:
-                await self.prepare_signals()
+                logger.info("Preparing signals...")
+                signals = await self.prepare_signals(verbose=True)
+                if signals:
+                    logger.info(f"Successfully prepared signals for {len(signals)} assets")
+                else:
+                    logger.warning("No signals were prepared in this cycle")
+                logger.info(f"Signal preparation complete, waiting {self.SIGNAL_FREQUENCY} seconds for next cycle...")
                 await asyncio.sleep(self.SIGNAL_FREQUENCY)
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
+                logger.info("Retrying in 5 seconds...")
                 await asyncio.sleep(5)  # Short sleep on error before retry
 
     async def _fetch_raw_signals(self):
