@@ -24,7 +24,7 @@ class BittensorProcessor:
     RAW_SIGNALS_DIR = "raw_signals/bittensor"
     ARCHIVE_DIR = "raw_signals/bittensor/archive"
     SIGNAL_FILE_PREFIX = "bittensor_signal"
-    SIGNAL_FREQUENCY = 2  # seconds between signal preparations
+    SIGNAL_FREQUENCY = 1  # seconds between signal preparations
     
     CORE_ASSET_MAPPING = {
         "BTCUSD": "BTCUSDT",
@@ -50,7 +50,7 @@ class BittensorProcessor:
     MIN_TRADES_PER_ASSET = 0           # Minimum trades required per asset
     MAX_TRADE_AGE_DAYS = 14            # Maximum age of latest trade in days
 
-    def __init__(self, *, enabled=False):
+    def __init__(self, *, enabled=True):
         self.credentials = load_bittensor_credentials()
         self.enabled = enabled
         self.miner_count_cache_filename = "miner_count_cache.txt"
@@ -163,21 +163,25 @@ class BittensorProcessor:
                 if total_weight > 0 else 0
             )
 
-            signals[asset] = {
+            # Use the mapped symbol for storage
+            mapped_asset = self.CORE_ASSET_MAPPING[asset]
+            signals[mapped_asset] = {
                 'depth': capped_leverage,
                 'price': weighted_price,
                 'timestamp': latest_timestamp
             }
             
             if verbose:
-                print(f"\n{asset}:")
+                print(f"\n{asset} -> {mapped_asset}:")
                 print(f"  Final Depth: {capped_leverage:.4f}")
                 print(f"  Average Price: ${weighted_price:.2f}")
+                print(f"  Latest Update: {datetime.utcfromtimestamp(latest_timestamp/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
                 print(f"  Contributing Miners: {len(positions)}")
                 print("  Individual Contributions:")
                 for pos in positions:
                     print(f"    {pos['miner']}: leverage={pos['leverage']:.4f}, "
-                          f"weight={pos['weight']:.4f}, trades={pos['trade_count']}")
+                          f"weight={pos['weight']:.4f}, trades={pos['trade_count']}, "
+                          f"last_update={datetime.utcfromtimestamp(pos['timestamp']/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
 
         # Store signals to disk and clean up old files
         self._store_signal_on_disk(signals)
@@ -187,9 +191,9 @@ class BittensorProcessor:
 
     def fetch_signals(self):
         """Read and combine signals from stored files, keeping only the latest for each asset."""
-        # Initialize with all core assets at zero depth
+        # Initialize with all core assets at zero depth using mapped symbols
         latest_signals = {
-            asset: {
+            self.CORE_ASSET_MAPPING[asset]: {
                 'depth': 0.0,
                 'price': 0.0,
                 'timestamp': 0
@@ -198,13 +202,15 @@ class BittensorProcessor:
         
         # Ensure directory exists
         if not os.path.exists(self.RAW_SIGNALS_DIR):
+            logger.warning(f"Signal directory {self.RAW_SIGNALS_DIR} does not exist")
             return latest_signals
             
         # Read all signal files
-        for filename in os.listdir(self.RAW_SIGNALS_DIR):
-            if not filename.startswith(self.SIGNAL_FILE_PREFIX) or not filename.endswith('.json'):
-                continue
-                
+        signal_files = [f for f in os.listdir(self.RAW_SIGNALS_DIR) 
+                       if f.startswith(self.SIGNAL_FILE_PREFIX) and f.endswith('.json')]
+        logger.info(f"Found {len(signal_files)} signal files")
+        
+        for filename in signal_files:
             file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -219,6 +225,9 @@ class BittensorProcessor:
                                 'price': signal['price'],
                                 'timestamp': signal['timestamp']
                             }
+                            logger.info(f"Updated {asset} signal: depth={signal['depth']:.4f}, "
+                                      f"price=${signal['price']:.2f}, "
+                                      f"time={datetime.utcfromtimestamp(signal['timestamp']/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
                             
             except (json.JSONDecodeError, KeyError) as e:
                 logger.error(f"Error reading signal file {filename}: {e}")
