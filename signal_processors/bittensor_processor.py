@@ -8,6 +8,7 @@ import zipfile
 import numpy as np
 from math import sqrt
 import logging
+import ujson as json
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class BittensorProcessor:
     RAW_SIGNALS_DIR = "raw_signals/bittensor"
     ARCHIVE_DIR = "raw_signals/bittensor/archive"
     SIGNAL_FILE_PREFIX = "bittensor_signal"
+    SIGNAL_FREQUENCY = 2  # seconds between signal preparations
     
     CORE_ASSET_MAPPING = {
         "BTCUSD": "BTCUSDT",
@@ -47,8 +49,8 @@ class BittensorProcessor:
         self.miner_count_cache_filename = "miner_count_cache.txt"
         self.miner_count_cache_path = os.path.join(self.RAW_SIGNALS_DIR, self.miner_count_cache_filename)
         
-    async def fetch_signals(self, verbose=False):
-        """Fetch and process signals from ranked miners."""
+    async def prepare_signals(self, verbose=False):
+        """Fetch, process, and store signals from ranked miners."""
         # Get raw signals and rank miners
         positions_data = await self._fetch_raw_signals()
         if not positions_data:
@@ -170,7 +172,62 @@ class BittensorProcessor:
                     print(f"    {pos['miner']}: leverage={pos['leverage']:.4f}, "
                           f"weight={pos['weight']:.4f}, trades={pos['trade_count']}")
 
+        # Store signals to disk and clean up old files
+        self._store_signal_on_disk(signals)
+        self._archive_old_files()
+        
         return signals
+
+    def fetch_signals(self):
+        """Read and combine signals from stored files, keeping only the latest for each asset."""
+        # Initialize with all core assets at zero depth
+        latest_signals = {
+            asset: {
+                'depth': 0.0,
+                'price': 0.0,
+                'timestamp': 0
+            } for asset in self.CORE_ASSET_MAPPING.keys()
+        }
+        
+        # Ensure directory exists
+        if not os.path.exists(self.RAW_SIGNALS_DIR):
+            return latest_signals
+            
+        # Read all signal files
+        for filename in os.listdir(self.RAW_SIGNALS_DIR):
+            if not filename.startswith(self.SIGNAL_FILE_PREFIX) or not filename.endswith('.json'):
+                continue
+                
+            file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    signals = ujson.load(f)
+                    
+                # Update latest signals based on timestamp
+                for asset, signal in signals.items():
+                    if asset in latest_signals:
+                        if signal['timestamp'] > latest_signals[asset]['timestamp']:
+                            latest_signals[asset] = {
+                                'depth': signal['depth'],
+                                'price': signal['price'],
+                                'timestamp': signal['timestamp']
+                            }
+                            
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Error reading signal file {filename}: {e}")
+                continue
+                
+        return latest_signals
+
+    async def run_signal_loop(self):
+        """Main loop for preparing signals at regular intervals."""
+        while True:
+            try:
+                await self.prepare_signals()
+                await asyncio.sleep(self.SIGNAL_FREQUENCY)
+            except Exception as e:
+                logger.error(f"Error in signal loop: {e}")
+                await asyncio.sleep(5)  # Short sleep on error before retry
 
     async def _fetch_raw_signals(self):
         """Fetch raw signals from the API."""
@@ -185,16 +242,26 @@ class BittensorProcessor:
                 return None
 
     def _store_signal_on_disk(self, data):
-        """Store raw signal data to disk."""
+        """Store raw signal data to disk using atomic operations."""
         if not os.path.exists(self.RAW_SIGNALS_DIR):
             os.makedirs(self.RAW_SIGNALS_DIR)
         
+        # Create temp directory if it doesn't exist
+        temp_dir = os.path.join(self.RAW_SIGNALS_DIR, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Create filenames
         timestamp = datetime.now().strftime("%Y-%m-%d")
         filename = f"{self.SIGNAL_FILE_PREFIX}_{timestamp}.json"
-        file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
+        temp_path = os.path.join(temp_dir, filename)
+        final_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
         
-        with open(file_path, 'w', encoding='utf-8') as f:
+        # Write to temporary file first
+        with open(temp_path, 'w', encoding='utf-8') as f:
             ujson.dump(data, f, indent=4)
+            
+        # Atomic rename operation
+        os.replace(temp_path, final_path)
 
     def _process_signals(self, data, top_miners=None, mapped_only=True):
         """Process raw signals into standardized format."""
@@ -795,7 +862,11 @@ if __name__ == '__main__':
     #    print("Failed to get rankings")
     #    exit(1)
     
+    #processor = BittensorProcessor(enabled=True)
+    #resulting_signals = asyncio.run(processor.prepare_signals(verbose=False))
+    #resulting_signals = processor.fetch_signals()
+    #print(resulting_signals)
+    
+    # Initialize processor and run the signal loop
     processor = BittensorProcessor(enabled=True)
-    #resulting_signals = asyncio.run(processor.fetch_signals(verbose=True))
-    resulting_signals = asyncio.run(processor.fetch_signals(verbose=False))
-    print(resulting_signals)
+    asyncio.run(processor.run_signal_loop())
