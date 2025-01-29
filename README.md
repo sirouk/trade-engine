@@ -119,7 +119,26 @@ You'll be prompted to configure each trading pair:
    Assign weight for BTCUSDT from bittensor (remaining weight: 0.90, press Enter for current value: 0.15): 
    ```
 
-The configuration will be saved to `signal_weight_config.json`. After configuration, a summary will be displayed showing all allocated weights and leverage values. Here's an example configuration file:
+The configuration will be saved to `signal_weight_config.json`. After configuration, a summary will be displayed showing all allocated weights and leverage values.
+
+### Configuration Changes and Service Restarts
+
+Different types of configuration changes require different service restarts:
+
+1. **Signal Weight Changes** (`signal_weight_config.json`):
+   - Changes are picked up dynamically by the trade engine
+   - No restart required
+   - Takes effect in the next trade engine loop
+
+2. **Signal Processor Configuration**:
+   - Changes to processor class files (e.g., `bittensor_processor.py`):
+     - Requires restart of the respective signal processor service
+     - Run: `pm2 restart bittensor-signals` for Bittensor changes
+   - Enabling/disabling processors in configuration:
+     - Requires trade engine restart
+     - Run: `pm2 restart trade-engine`
+
+Example configuration file:
 
 ```json
 [
@@ -163,11 +182,13 @@ The configuration will be saved to `signal_weight_config.json`. After configurat
 
 To update either configuration later, simply rerun the respective configuration script.
 
-
-
 ## Running the Trade Engine
 
-First, run the trade engine manually to verify everything is working:
+First, start the signal processors. See the respective documentation for detailed setup:
+- [TradingView Endpoint](signal_endpoints/README.md)
+- [Signal Processors](signal_processors/README.md)
+
+Then, run the trade engine manually to verify everything is working:
 
 ```bash
 cd $HOME/trading-engine
@@ -189,7 +210,7 @@ pm2 startup && pm2 save --force
 
 ### PM2 Log Management
 
-Set up log rotation for the trade engine:
+Set up log rotation for all services:
 
 ```bash
 # Install pm2-logrotate module if not already installed
@@ -212,14 +233,23 @@ pm2 set pm2-logrotate:rotateInterval '00 */6 * * *'
 
 ```bash
 # View logs
-pm2 logs trade-engine
+pm2 logs                           # View all logs
+pm2 logs tradingview-endpoint      # View TradingView endpoint logs
+pm2 logs bittensor-signals         # View Bittensor signal processor logs
+pm2 logs trade-engine              # View trade engine logs
 
 # Monitor processes
 pm2 monit
 
-# Restart the trade engine
-pm2 restart trade-engine
+# Restart services
+pm2 restart all                    # Restart all services
+pm2 restart tradingview-endpoint   # Restart TradingView endpoint
+pm2 restart bittensor-signals      # Restart Bittensor signal processor
+pm2 restart trade-engine           # Restart trade engine
 
-# Stop the trade engine
-pm2 stop trade-engine
+# Stop services
+pm2 stop all                       # Stop all services
+pm2 stop tradingview-endpoint      # Stop TradingView endpoint
+pm2 stop bittensor-signals         # Stop Bittensor signal processor
+pm2 stop trade-engine              # Stop trade engine
 ```

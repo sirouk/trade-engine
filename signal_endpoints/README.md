@@ -24,7 +24,9 @@ else
 fi
 ```
 
-### Start the endpoint
+### Start the endpoints
+
+#### TradingView Endpoint
 
 Run this manually first to set up the endpoint with your webhook domain name (ex. tv-webhook.domain.com)
 
