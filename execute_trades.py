@@ -135,8 +135,9 @@ class TradeExecutor:
                 notional_value = position_value * leverage  # Total position value including leverage
                 quantity = notional_value / price  # Convert to asset quantity
 
-                if depth < 0:
-                    quantity = -quantity
+                # Preserve the sign from the depth value
+                #if depth < 0:
+                #    quantity = -quantity
 
                 logger.info(f"Account Value: {total_value}, Depth: {depth}, "
                            f"Position Value: {position_value}, Leverage: {leverage}, "
