@@ -38,16 +38,16 @@ def filter_positions_by_assets(data, asset_list):
                 total_trades += 1
         
         # if there are less than 20 trades for any asset in the asset_list, skip this miner
-        for asset in asset_list:
-            if asset_trades.get(asset, 0) < 20:
-                continue
+        #for asset in asset_list:
+        #    if asset_trades.get(asset, 0) < 20:
+        #        continue
         
-        if total_trades == 0 or profitable_trades / total_trades <= 0.90:
-            continue
+        #if total_trades == 0 or profitable_trades / total_trades <= 0.90:
+        #    continue
         
         # if the latest trade was more than 15 days ago, skip this miner
-        if latest_trade < datetime.now().timestamp() * 1000 - 15 * 24 * 60 * 60 * 1000:
-            continue
+        #if latest_trade < datetime.now().timestamp() * 1000 - 15 * 24 * 60 * 60 * 1000:
+        #    continue
         
         filtered_positions = [
             pos for pos in details["positions"]
@@ -78,8 +78,15 @@ def calculate_max_drawdown_from_orders(orders):
     """
     Calculate max drawdown for a position considering leverage and price changes across orders,
     accounting for both long and short positions.
+    
+    The drawdown is calculated as a percentage of the total account value, considering:
+    1. The amount of account utilized (leverage)
+    2. The price movement relative to the average entry price
+    3. Sequential impact of adding to positions
+    
+    Returns a negative value representing the maximum drawdown percentage.
     """
-    cumulative_leverage = 0  # Cumulative leverage
+    cumulative_leverage = 0  # Cumulative leverage (represents account utilization)
     weighted_sum_price = 0  # Sum of leverage-weighted prices for averaging
     max_drawdown = 0  # Track the maximum drawdown
     current_price = None
@@ -98,6 +105,7 @@ def calculate_max_drawdown_from_orders(orders):
         cumulative_leverage += leverage
         if cumulative_leverage == 0:
             continue
+        
         weighted_sum_price += leverage * price
         average_price = weighted_sum_price / cumulative_leverage
 
@@ -105,12 +113,16 @@ def calculate_max_drawdown_from_orders(orders):
         current_price = price
 
         # Calculate the drawdown relative to the average entry price
+        # and multiply by account utilization (cumulative_leverage)
         if cumulative_leverage > 0:  # Long position
-            drawdown = (current_price - average_price) / average_price
+            price_drawdown = (current_price - average_price) / average_price
+            account_drawdown = price_drawdown * abs(cumulative_leverage)
         else:  # Short position
-            drawdown = (average_price - current_price) / average_price
+            price_drawdown = (average_price - current_price) / average_price
+            account_drawdown = price_drawdown * abs(cumulative_leverage)
 
-        max_drawdown = min(max_drawdown, drawdown)  # Track the deepest drawdown
+        # Store as negative value since it's a drawdown
+        max_drawdown = min(max_drawdown, -abs(account_drawdown))  # Track the deepest drawdown
 
     return max_drawdown
 
@@ -145,134 +157,129 @@ def get_position_count_score(n_positions, max_positions):
     """Calculate position count score using logarithmic scaling."""
     return np.log1p(n_positions) / np.log1p(max_positions)
 
+def normalize_to_percentile(values, reverse=False):
+    """
+    Normalize values to percentile ranks (0-1), where 1.0 is the best performer.
+    If reverse=True, lower values are considered better.
+    """
+    if not values:
+        return []
+    
+    # Sort values and assign ranks
+    sorted_with_idx = sorted(enumerate(values), key=lambda x: x[1], reverse=not reverse)
+    n = len(sorted_with_idx)
+    
+    # Create percentile ranks (1.0 for best performer)
+    ranks = [0] * n
+    for rank, (idx, _) in enumerate(sorted_with_idx):
+        ranks[idx] = 1.0 - (rank / (n - 1) if n > 1 else 0)
+    
+    return ranks
+
 def calculate_miner_scores(data):
-    # Collect all metrics for normalization
-    all_time_returns_list = []
-    thirty_day_returns_list = []
-    percentage_profitable_list = []
-    asset_returns_list = []
-    sharpe_ratios = []
-    max_drawdowns = []
-    consistency_scores = []
-    position_counts = []
-
-    # Precompute max active days for experience score
-    active_days_list = []
-    for miner in data.values():
-        if miner['positions']:
-            first_trade = min(position['open_ms'] for position in miner['positions'])
-            last_trade = max(
-                position['close_ms'] if position['is_closed_position'] else datetime.now().timestamp() * 1000
-                for position in miner['positions']
-            )
-            active_days = (last_trade - first_trade) / (1000 * 60 * 60 * 24)
-            active_days_list.append(active_days)
-        else:
-            active_days_list.append(0)
-    max_active_days = max(active_days_list, default=1)
-
-    # Calculate additional metrics for each miner
-    for idx, miner in enumerate(data.values()):
-        #hotkey = list(data.keys())[idx]
-        
+    """
+    Calculate scores for each miner based on their trading performance.
+    Only considers trades for the specified assets in the filtered data.
+    """
+    metrics_data = []
+    
+    for hotkey, miner in data.items():
+        if not miner['positions']:
+            continue
+            
         position_returns = []
         profitable_trades = 0
         total_trades = 0
-        asset_returns = 0.0
-
-        # Calculate the miner's maximum drawdown from positions
-        miner_max_drawdown = calculate_max_drawdown_from_positions(miner["positions"]) + 1
-        # get the hotkey of the miner
-        #print(f"Miner {hotkey} max drawdown: {miner_max_drawdown}")
-
-        for position in miner["positions"]:
-            # Determine profitability for each position
-            if position["is_closed_position"]:
-                return_at_close = position["return_at_close"] - 1
+        
+        # Calculate max drawdown from filtered positions
+        max_drawdown = calculate_max_drawdown_from_positions(miner['positions'])
+        
+        # Process each position for returns and profitability
+        for position in miner['positions']:
+            if position['is_closed_position']:
+                return_at_close = position['return_at_close'] - 1  # Convert to percentage
                 position_returns.append(return_at_close)
-                asset_returns += return_at_close
                 if return_at_close > 0:
                     profitable_trades += 1
             else:
-                current_return = position["current_return"] - 1
+                current_return = position['current_return'] - 1  # Convert to percentage
                 position_returns.append(current_return)
-                asset_returns += current_return
                 if current_return > 0:
                     profitable_trades += 1
             total_trades += 1
-
-        # Collect metrics for normalization
-        if position_returns:
-            all_time_returns_list.append(miner["all_time_returns"] - 1)
-            thirty_day_returns_list.append(miner["thirty_day_returns"] - 1)
-            percentage_profitable_list.append(profitable_trades / total_trades if total_trades > 0 else 0)
-            asset_returns_list.append(asset_returns)
-            sharpe_ratios.append(calculate_sharpe_ratio(position_returns))
-            max_drawdowns.append(miner_max_drawdown)  # Use the miner's maximum drawdown
-            position_counts.append(total_trades)
-            consistency_scores.append(get_trade_consistency_score(miner))
-        else:
-            # Append neutral/default values for miners without relevant positions
-            all_time_returns_list.append(0)
-            thirty_day_returns_list.append(0)
-            percentage_profitable_list.append(0)
-            asset_returns_list.append(0)
-            sharpe_ratios.append(0)
-            max_drawdowns.append(0)
-            position_counts.append(0)
-            consistency_scores.append(0)
-
-    # Normalize metrics
-    normalized_metrics = []
-    for idx, miner in enumerate(data.values()):
-        total_score = 0
-        if miner["positions"]:  # Only calculate scores if there are relevant positions
-            max_drawdown = normalize_metric(
-                "max_drawdown", max_drawdowns[idx], min(max_drawdowns), max(max_drawdowns)
-            )
-            thirty_day_returns = normalize_metric(
-                "thirty_day_returns", thirty_day_returns_list[idx], min(thirty_day_returns_list), max(thirty_day_returns_list)
-            )
-            sharpe_ratio = normalize_metric(
-                "sharpe_ratio", sharpe_ratios[idx], min(sharpe_ratios), max(sharpe_ratios)
-            )
-            percentage_profitable = normalize_metric(
-                "percentage_profitable", percentage_profitable_list[idx], min(percentage_profitable_list), max(percentage_profitable_list)
-            )
-            asset_returns = normalize_metric(
-                "asset_returns", asset_returns_list[idx], min(asset_returns_list), max(asset_returns_list)
-            )
-            consistency_score = normalize_metric(
-                "consistency_score", consistency_scores[idx], min(consistency_scores), max(consistency_scores)
-            )
-            position_count_score = get_position_count_score(
-                position_counts[idx], max(position_counts)
-            )
-
-            total_score = (
-                max_drawdown**5 +
-                sharpe_ratio**3 +
-                thirty_day_returns**3 +
-                asset_returns**2 +
-                percentage_profitable**2 +
-                position_count_score**2 +
-                consistency_score**2
-            )
-
-        normalized_metrics.append({
-            "hotkey": list(data.keys())[idx],
-            "total_score": float(total_score),
-            "max_drawdown": float(max_drawdown),
-            "sharpe_ratio": float(sharpe_ratio),
-            "thirty_day_returns": float(thirty_day_returns),
-            "asset_returns": float(asset_returns),
-            "percentage_profitable": float(percentage_profitable),
-            "position_count_score": float(position_count_score),
-            "consistency_score": float(consistency_score),
+        
+        if total_trades == 0:
+            continue
+            
+        # Calculate metrics
+        percentage_profitable = profitable_trades / total_trades
+        sharpe_ratio = calculate_sharpe_ratio(position_returns)
+        consistency_score = get_trade_consistency_score(miner)
+        position_count = total_trades
+        total_return = sum(position_returns)  # Total return as percentage
+        
+        metrics_data.append({
+            'hotkey': hotkey,
+            'metrics': {
+                'max_drawdown': max_drawdown,  # Already as percentage
+                'sharpe_ratio': sharpe_ratio,
+                'total_return': total_return,  # As percentage
+                'percentage_profitable': percentage_profitable,
+                'position_count': position_count,
+                'consistency_score': consistency_score
+            }
         })
-
-    # Rank miners by total score
-    return sorted(normalized_metrics, key=lambda x: x["total_score"], reverse=True)
+    
+    if not metrics_data:
+        return []
+    
+    # Collect values for percentile ranking
+    all_metrics = [m['metrics'] for m in metrics_data]
+    sharpe_ratios = [m['sharpe_ratio'] for m in all_metrics]
+    profitable_percentages = [m['percentage_profitable'] for m in all_metrics]
+    position_counts = [m['position_count'] for m in all_metrics]
+    consistency_scores = [m['consistency_score'] for m in all_metrics]
+    
+    # Calculate percentile ranks
+    sharpe_percentiles = normalize_to_percentile(sharpe_ratios)
+    profitable_percentiles = normalize_to_percentile(profitable_percentages)
+    position_count_percentiles = normalize_to_percentile(position_counts)
+    consistency_percentiles = normalize_to_percentile(consistency_scores)
+    
+    # Create normalized scores
+    normalized_metrics = []
+    for idx, miner_data in enumerate(metrics_data):
+        metrics = miner_data['metrics']
+        
+        # Convert drawdown to positive score (e.g., -0.15 → 0.85)
+        drawdown_score = 1.0 + metrics['max_drawdown']
+        
+        # Convert total return to absolute value (e.g., 0.15 → 1.15)
+        return_score = 1.0 + metrics['total_return']
+        
+        normalized = {
+            'hotkey': miner_data['hotkey'],
+            'max_drawdown': float(drawdown_score),
+            'total_return': float(return_score),
+            'sharpe_ratio': float(sharpe_percentiles[idx]),
+            'percentage_profitable': float(profitable_percentiles[idx]),
+            'position_count': float(position_count_percentiles[idx]),
+            'consistency_score': float(consistency_percentiles[idx])
+        }
+        
+        # Calculate total score with weighted components
+        normalized['total_score'] = float(
+            normalized['max_drawdown']**5 +
+            normalized['sharpe_ratio']**3 +
+            normalized['total_return']**2 +
+            normalized['percentage_profitable']**2 +
+            normalized['position_count']**2 +
+            normalized['consistency_score']**2
+        )
+        
+        normalized_metrics.append(normalized)
+    
+    return sorted(normalized_metrics, key=lambda x: x['total_score'], reverse=True)
 
 # make a function that stores the number of keys to a cache file in the same directory as where the fetch_bittensor_signals() stores the data
 def store_key_count(current_key_count, path):
@@ -288,6 +295,89 @@ def fetch_key_count(path):
     with open(path, 'r', encoding='utf-8') as f:
         return int(f.read())
     
+def calculate_asset_metrics(positions, asset):
+    """Calculate metrics for a specific asset from positions."""
+    asset_positions = [p for p in positions if p["trade_pair"][0] == asset]
+    
+    if not asset_positions:
+        return None
+        
+    total_trades = len(asset_positions)
+    total_return = sum(
+        (p["return_at_close"] - 1) if p["is_closed_position"] 
+        else (p["current_return"] - 1) 
+        for p in asset_positions
+    )
+    
+    # Calculate average entries per position
+    total_entries = sum(len(p.get("orders", [])) for p in asset_positions)
+    avg_entries = total_entries / total_trades if total_trades > 0 else 0
+    
+    # Calculate max drawdown for this asset's positions
+    max_drawdown = calculate_max_drawdown_from_positions(asset_positions)
+    
+    return {
+        "total_trades": total_trades,
+        "total_return": total_return,
+        "avg_entries": avg_entries,
+        "max_drawdown": max_drawdown
+    }
+
+def format_miner_results(ranked_miners, positions_data, assets_to_trade):
+    """Format miner results in a clean, readable way."""
+    formatted_results = []
+    
+    for miner in ranked_miners:
+        hotkey = miner['hotkey']
+        scores = {
+            'total_score': miner['total_score'],
+            'sharpe_ratio': miner['sharpe_ratio'],
+            'percentage_profitable': miner['percentage_profitable'],
+            'consistency_score': miner['consistency_score']
+        }
+        
+        # Get per-asset metrics
+        asset_metrics = {}
+        for asset in assets_to_trade:
+            metrics = calculate_asset_metrics(
+                [p for p in positions_data[hotkey]['positions'] if p["trade_pair"][0] == asset],
+                asset
+            )
+            if metrics:
+                asset_metrics[asset] = metrics
+        
+        formatted_results.append({
+            'hotkey': hotkey,
+            'scores': scores,
+            'asset_metrics': asset_metrics
+        })
+    
+    return formatted_results
+
+def display_ranked_miners(formatted_results):
+    """Display the formatted results in a clean, readable way."""
+    for rank, result in enumerate(formatted_results, 1):  # Start counting from 1
+        print("\n" + "="*80)
+        print(f"Rank #{rank} - Miner: {result['hotkey']}")
+        print("-"*80)
+        
+        # Display overall scores
+        scores = result['scores']
+        print("Overall Scores:")
+        print(f"  Total Score: {scores['total_score']:.4f}")
+        print(f"  Sharpe Ratio Rank: {scores['sharpe_ratio']:.4f}")
+        print(f"  Profitable Trade %: {scores['percentage_profitable']:.4f}")
+        print(f"  Consistency Score: {scores['consistency_score']:.4f}")
+        
+        # Display per-asset metrics
+        print("\nPer-Asset Metrics:")
+        for asset, metrics in result['asset_metrics'].items():
+            print(f"\n  {asset}:")
+            print(f"    Trades: {metrics['total_trades']}")
+            print(f"    Max Drawdown: {(1 + metrics['max_drawdown'])*100:.2f}%")
+            print(f"    Avg Entries/Position: {metrics['avg_entries']:.2f}")
+            print(f"    Total Return: {(1 + metrics['total_return'])*100:.2f}%")
+
 async def get_ranked_miners(assets_to_trade=None):
     """
     Fetch ranked miners and display the results along with their ranks.
@@ -311,17 +401,13 @@ async def get_ranked_miners(assets_to_trade=None):
     # store the current key count
     store_key_count(current_key_count, miner_count_cache_path)
     
-
     rankings, ranked_miners = rank_miners(positions_data, assets_to_trade)
-
-    # Display the rankings and top miners
-    print("Miner Rankings:")
-    for hotkey, rank in rankings.items():
-        print(f"{rank}: {hotkey}")
-
-    print("\nTop Miners by Score:")
-    for miner in ranked_miners[:10]:
-        print(miner)
+    
+    # Format and display results
+    formatted_results = format_miner_results(ranked_miners, positions_data, assets_to_trade)
+    display_ranked_miners(formatted_results)
+    
+    return rankings, ranked_miners
 
 def rank_miners(positions_data, assets_to_trade=None):
     """
@@ -333,6 +419,8 @@ def rank_miners(positions_data, assets_to_trade=None):
     
     # Calculate scores and sort miners
     ranked_miners = calculate_miner_scores(positions_data)
+    #print(ranked_miners)
+    #quit()
 
     # Build a dictionary mapping hotkeys to ranks
     rankings = {miner['hotkey']: rank + 1 for rank, miner in enumerate(ranked_miners)}
@@ -346,3 +434,5 @@ if __name__ == '__main__':
     if rankings is None:
         print("Failed to get rankings")
         exit(1)
+    
+    #print(ranked_miners)
