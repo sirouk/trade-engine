@@ -190,8 +190,8 @@ class BittensorProcessor:
                 # Get the last known signal for this asset
                 last_signal = self.fetch_last_signal(mapped_asset)
                 signals[mapped_asset] = {
-                    'depth': 0.0,
-                    'price': 0.0,
+                    'depth': last_signal.get('depth', 0.0) if last_signal else 0.0,
+                    'price': last_signal.get('price', 0.0) if last_signal else 0.0,
                     'timestamp': last_signal.get('timestamp', current_time) if last_signal else current_time
                 }
 
