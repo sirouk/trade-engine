@@ -183,6 +183,18 @@ class BittensorProcessor:
                           f"weight={pos['weight']:.4f}, trades={pos['trade_count']}, "
                           f"last_update={datetime.utcfromtimestamp(pos['timestamp']/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
 
+        # Ensure all mapped assets have an entry
+        current_time = int(datetime.now().timestamp() * 1000)
+        for mapped_asset in self.CORE_ASSET_MAPPING.values():
+            if mapped_asset not in signals:
+                # Get the last known signal for this asset
+                last_signal = self.fetch_last_signal(mapped_asset)
+                signals[mapped_asset] = {
+                    'depth': 0.0,
+                    'price': 0.0,
+                    'timestamp': last_signal.get('timestamp', current_time) if last_signal else current_time
+                }
+
         # Store signals to disk and clean up old files
         self._store_signal_on_disk(signals)
         self._archive_old_files()
@@ -875,6 +887,30 @@ class BittensorProcessor:
             return -1
         with open(self.miner_count_cache_path, 'r', encoding='utf-8') as f:
             return int(f.read())
+
+    def fetch_last_signal(self, asset):
+        """Fetch the last known signal for an asset from stored files."""
+        if not os.path.exists(self.RAW_SIGNALS_DIR):
+            return None
+            
+        # Get all signal files sorted by date (newest first)
+        signal_files = sorted([
+            f for f in os.listdir(self.RAW_SIGNALS_DIR) 
+            if f.startswith(self.SIGNAL_FILE_PREFIX) and f.endswith('.json')
+        ], reverse=True)
+        
+        # Look through files until we find the last signal for this asset
+        for filename in signal_files:
+            file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    signals = ujson.load(f)
+                    if asset in signals:
+                        return signals[asset]
+            except (json.JSONDecodeError, KeyError):
+                continue
+                
+        return None
 
 # Example standalone usage
 if __name__ == '__main__':
