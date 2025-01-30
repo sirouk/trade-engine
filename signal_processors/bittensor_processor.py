@@ -218,9 +218,12 @@ class BittensorProcessor:
             return latest_signals
             
         # Read all signal files
-        signal_files = [f for f in os.listdir(self.RAW_SIGNALS_DIR) 
-                       if f.startswith(self.SIGNAL_FILE_PREFIX) and f.endswith('.json')]
-        logger.info(f"Found {len(signal_files)} signal files")
+        signal_files = sorted([
+            f for f in os.listdir(self.RAW_SIGNALS_DIR) 
+            if f.startswith(self.SIGNAL_FILE_PREFIX) and f.endswith('.json')
+        ], reverse=True)  # Sort newest first
+        
+        logger.info(f"Found {len(signal_files)} signal files to process")
         
         for filename in signal_files:
             file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
@@ -231,20 +234,35 @@ class BittensorProcessor:
                 # Update latest signals based on timestamp
                 for asset, signal in signals.items():
                     if asset in latest_signals:
-                        if signal['timestamp'] > latest_signals[asset]['timestamp']:
+                        current_timestamp = latest_signals[asset]['timestamp']
+                        new_timestamp = signal['timestamp']
+                        
+                        if new_timestamp > current_timestamp:
                             latest_signals[asset] = {
                                 'depth': signal['depth'],
                                 'price': signal['price'],
-                                'timestamp': signal['timestamp']
+                                'timestamp': new_timestamp
                             }
-                            logger.info(f"Updated {asset} signal: depth={signal['depth']:.4f}, "
-                                      f"price=${signal['price']:.2f}, "
-                                      f"time={datetime.utcfromtimestamp(signal['timestamp']/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
+                            logger.debug(
+                                f"Updated {asset} signal from {filename}: "
+                                f"depth={signal['depth']:.4f}, "
+                                f"price=${signal['price']:.2f}, "
+                                f"time={datetime.utcfromtimestamp(new_timestamp/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC"
+                            )
                             
             except (json.JSONDecodeError, KeyError) as e:
                 logger.error(f"Error reading signal file {filename}: {e}")
                 continue
-                
+        
+        # Log final signals
+        logger.info("Final signals after processing all files:")
+        for asset, signal in latest_signals.items():
+            logger.info(
+                f"{asset}: depth={signal['depth']:.4f}, "
+                f"price=${signal['price']:.2f}, "
+                f"time={datetime.utcfromtimestamp(signal['timestamp']/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC"
+            )
+            
         return latest_signals
 
     async def run_signal_loop(self):
