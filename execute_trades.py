@@ -341,15 +341,16 @@ async def main():
     logger.info(f"Starting execution cycle at {datetime.now()}")
     while True:
         try:
+            
             # Execute trades
             await executor.execute()
-            logger.info("Execution complete, waiting for next cycle...")
+            logger.info(f"Execution complete, waiting {executor.sleep_time} seconds for next cycle...")
+            time.sleep(executor.sleep_time)
             
         except Exception as e:
             logger.error(f"Error in main loop: {str(e)}")
             time.sleep(5)
         
-        time.sleep(executor.sleep_time)
-
+        
 if __name__ == "__main__":
     asyncio.run(main()) 

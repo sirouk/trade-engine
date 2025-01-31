@@ -280,7 +280,7 @@ class BittensorProcessor:
             if f.startswith(self.SIGNAL_FILE_PREFIX) and f.endswith('.json')
         ], reverse=True)  # Sort newest first
         
-        logger.info(f"Found {len(signal_files)} signal files to process")
+        #logger.info(f"Found {len(signal_files)} signal files to process")
         
         for filename in signal_files:
             file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
@@ -312,7 +312,7 @@ class BittensorProcessor:
                 continue
         
         # Log final signals
-        logger.info("Final signals after processing all files:")
+        logger.info(f"Final signals after processing all {len(signal_files)} signal files:")
         for asset, signal in latest_signals.items():
             logger.info(
                 "%s: depth=%.4f, price=$%.2f, time=%s UTC",
@@ -327,13 +327,13 @@ class BittensorProcessor:
         logger.info("Starting Bittensor signal processor loop")
         while True:
             try:
-                logger.info("Preparing signals...")
+                logger.info("Fetching signals from Bittensor SN8 API...")
                 signals = await self.prepare_signals(verbose=True)
-                if signals:
-                    logger.info(f"Successfully prepared signals for {len(signals)} assets")
-                else:
-                    logger.warning("No signals were prepared in this cycle")
-                logger.info(f"Signal preparation complete, waiting {self.SIGNAL_FREQUENCY} seconds for next cycle...")
+                #if signals:
+                #    logger.info(f"Successfully prepared signals for {len(signals)} assets")
+                #else:
+                #    logger.warning("No signals were prepared in this cycle")
+                logger.info(f"Signal preparation complete. There were {len(signals)} signals prepared. Waiting {self.SIGNAL_FREQUENCY} seconds for next cycle...")
                 await asyncio.sleep(self.SIGNAL_FREQUENCY)
             except Exception as e:
                 logger.error(f"Error in signal loop: {e}")
