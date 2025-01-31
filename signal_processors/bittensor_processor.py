@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import ujson
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from config.credentials import load_bittensor_credentials
 import zipfile
 import numpy as np
@@ -10,14 +10,19 @@ from math import sqrt
 import logging
 import ujson as json
 
-# Configure logging
+# Configure logging with a more robust setup
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-if not logger.handlers:
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', '%Y-%m-%d %I:%M:%S %p')
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+# Remove all handlers to ensure we don't add duplicates
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+# Prevent propagation to root logger
+logger.propagate = False
+# Add our handler
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', '%Y-%m-%d %I:%M:%S %p')
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 class BittensorProcessor:
     SIGNAL_SOURCE = "bittensor"
@@ -127,7 +132,7 @@ class BittensorProcessor:
                         print(f"  Trade Count: {len(orders)}")
                         print(f"  Miner Weight: {miner_weight:.4f}")
                         print(f"  Weighted Leverage: {weighted_leverage:.4f}")
-                        print(f"  Last Update: {datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+                        print(f"  Last Update: {datetime.fromtimestamp(timestamp/1000, UTC).strftime('%Y-%m-%d %H:%M:%S %p')} UTC")
                     
                     asset_depths[asset].append({
                         'miner': miner_hotkey,
@@ -175,16 +180,16 @@ class BittensorProcessor:
                 print(f"\n{asset} -> {mapped_asset}:")
                 print(f"  Final Depth: {capped_leverage:.4f}")
                 print(f"  Average Price: ${weighted_price:.2f}")
-                print(f"  Latest Update: {datetime.utcfromtimestamp(latest_timestamp/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
+                print(f"  Latest Update: {datetime.fromtimestamp(latest_timestamp/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
                 print(f"  Contributing Miners: {len(positions)}")
                 print("  Individual Contributions:")
                 for pos in positions:
                     print(f"    {pos['miner']}: leverage={pos['leverage']:.4f}, "
                           f"weight={pos['weight']:.4f}, trades={pos['trade_count']}, "
-                          f"last_update={datetime.utcfromtimestamp(pos['timestamp']/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
+                          f"last_update={datetime.fromtimestamp(pos['timestamp']/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
 
         # Ensure all mapped assets have an entry
-        current_time = int(datetime.now().timestamp() * 1000)
+        current_time = int(datetime.now(UTC).timestamp() * 1000)
         for mapped_asset in self.CORE_ASSET_MAPPING.values():
             if mapped_asset not in signals:
                 # Get the last known signal for this asset
@@ -247,7 +252,7 @@ class BittensorProcessor:
                                 f"Updated {asset} signal from {filename}: "
                                 f"depth={signal['depth']:.4f}, "
                                 f"price=${signal['price']:.2f}, "
-                                f"time={datetime.utcfromtimestamp(new_timestamp/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC"
+                                f"time={datetime.fromtimestamp(new_timestamp/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')} UTC"
                             )
                             
             except (json.JSONDecodeError, KeyError) as e:
@@ -258,9 +263,9 @@ class BittensorProcessor:
         logger.info("Final signals after processing all files:")
         for asset, signal in latest_signals.items():
             logger.info(
-                f"{asset}: depth={signal['depth']:.4f}, "
-                f"price=${signal['price']:.2f}, "
-                f"time={datetime.utcfromtimestamp(signal['timestamp']/1000).strftime('%Y-%m-%d %I:%M:%S %p')} UTC"
+                "%s: depth=%.4f, price=$%.2f, time=%s UTC",
+                asset, signal['depth'], signal['price'],
+                datetime.fromtimestamp(signal['timestamp']/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')
             )
             
         return latest_signals
@@ -305,7 +310,7 @@ class BittensorProcessor:
         os.makedirs(temp_dir, exist_ok=True)
         
         # Create filenames
-        timestamp = datetime.now().strftime("%Y-%m-%d")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
         filename = f"{self.SIGNAL_FILE_PREFIX}_{timestamp}.json"
         temp_path = os.path.join(temp_dir, filename)
         final_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
@@ -380,7 +385,7 @@ class BittensorProcessor:
                 normalized_depth = (capped_leverage / self.LEVERAGE_LIMIT_CRYPTO) * allocation_weight
                 
                 latest_order_ms = max(order['processed_ms'] for order in position_data['orders'])
-                latest_order_tstamp = datetime.fromtimestamp(latest_order_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                latest_order_tstamp = datetime.fromtimestamp(latest_order_ms / 1000, UTC).strftime("%Y-%m-%d %H:%M:%S")
                     
                 print(f"Miner {miner_hotkey} in {symbol} with {normalized_depth:.2%} depth of ${avg_price:.2f} at {latest_order_tstamp}")
                 
@@ -406,7 +411,7 @@ class BittensorProcessor:
 
             # Get the last entry date for the symbol
             last_entry_ms = max(entry["processed_ms"] for entry in entries)
-            last_entry_date = datetime.fromtimestamp(last_entry_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+            last_entry_date = datetime.fromtimestamp(last_entry_ms / 1000, UTC).strftime("%Y-%m-%d %H:%M:%S")
 
             # Get the latest recorded price for the symbol using the last entry date
             last_price = next(
@@ -494,7 +499,7 @@ class BittensorProcessor:
         if not os.path.exists(self.ARCHIVE_DIR):
             os.makedirs(self.ARCHIVE_DIR)
             
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         
         for filename in os.listdir(self.RAW_SIGNALS_DIR):
             # Only process bittensor signal files
@@ -505,7 +510,7 @@ class BittensorProcessor:
             if not os.path.isfile(file_path):
                 continue
             
-            file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+            file_time = datetime.fromtimestamp(os.path.getmtime(file_path), UTC)
             if file_time < cutoff:
                 # Create zip file name with original timestamp
                 zip_filename = f"{os.path.splitext(filename)[0]}.zip"
@@ -556,7 +561,7 @@ class BittensorProcessor:
                     continue
             
             if self.MAX_TRADE_AGE_DAYS < float('inf'):
-                if latest_trade < datetime.now().timestamp() * 1000 - self.MAX_TRADE_AGE_DAYS * 24 * 60 * 60 * 1000:
+                if latest_trade < datetime.now(UTC).timestamp() * 1000 - self.MAX_TRADE_AGE_DAYS * 24 * 60 * 60 * 1000:
                     continue
             
             filtered_positions = [
