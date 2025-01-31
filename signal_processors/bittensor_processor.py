@@ -122,21 +122,28 @@ class BittensorProcessor:
             logger.error("No qualified miners found")
             return {}
 
+        # Store miner metrics for later reference
+        miner_metrics = {}
         if verbose:
-            print("\n=== Qualified Miners and Their Positions ===")
+            print("\n=== Qualified Miners ===")
             for rank, miner in enumerate(ranked_miners, 1):
-                print(f"\nRank #{rank} - Miner: {miner['hotkey']}")
-                print(f"Overall Metrics:")
-                print(f"  Total Score: {miner['total_score']:.4f}")
-                print(f"  Profitability: {miner['percentage_profitable']*100:.2f}%")
-                print(f"  Sharpe Ratio: {miner['sharpe_ratio']:.4f}")
+                miner_metrics[miner['hotkey']] = {
+                    'rank': rank,
+                    'total_score': miner['total_score'],
+                    'profitability': miner['percentage_profitable']*100,
+                    'sharpe_ratio': miner['sharpe_ratio']
+                }
+                #print(f"\nRank #{rank} - Miner: {miner['hotkey']}")
+                #print(f"    Total Score: {miner['total_score']:.4f}")
+                #print(f"    Profitability: {miner['percentage_profitable']*100:.2f}%")
+                #print(f"    Sharpe Ratio scaled: {miner['sharpe_ratio']:.4f}")
 
         # Calculate gradient allocation weights for miners
         allocations = self._calculate_gradient_allocation(len(ranked_miners))
-        if verbose:
-            print("\n=== Gradient Allocations ===")
-            for rank, weight in allocations.items():
-                print(f"Rank {rank}: {weight:.4f}")
+        #if verbose:
+            #print("\n=== Gradient Allocations ===")
+            #for rank, weight in allocations.items():
+            #    print(f"Rank {rank}: {weight:.4f}")
 
         # Initialize asset depths
         asset_depths = {asset: [] for asset in assets_to_trade}
@@ -157,9 +164,13 @@ class BittensorProcessor:
             miner_weight = allocations[rank]  # Get miner's weight based on rank
             miner_positions = positions_data[miner_hotkey]['positions']
 
-            if verbose:
-                print(f"\nProcessing Miner {miner_hotkey} (Rank {rank}):")
-                print(f"  Weight: {miner_weight:.4f}")
+            if verbose and any(position['trade_pair'][0] in assets_to_trade for position in miner_positions):
+                metrics = miner_metrics[miner_hotkey]
+                print(f"\nRank #{metrics['rank']} - Miner: {miner_hotkey}")
+                print(f"    Total Score: {metrics['total_score']:.4f}")
+                print(f"    Profitability: {metrics['profitability']:.2f}%")
+                print(f"    Sharpe Ratio scaled: {metrics['sharpe_ratio']:.4f}")
+                print(f"    Weight: {miner_weight:.4f}")
 
             # Group positions by asset
             for position in miner_positions:
@@ -175,11 +186,11 @@ class BittensorProcessor:
                     weighted_leverage = net_pos * miner_weight
                     
                     if verbose:
-                        print(f"  Position in {asset}:")
-                        print(f"    Net Position: {net_pos:.4f}")
-                        print(f"    Average Price: ${avg_price:.2f}")
-                        print(f"    Trade Count: {len(orders)}")
-                        print(f"    Weighted Leverage: {weighted_leverage:.4f}")
+                        print(f"    Position in {asset}:")
+                        print(f"        Net Position: {net_pos:.4f}")
+                        print(f"        Average Price: ${avg_price:.2f}")
+                        print(f"        Trade Count: {len(orders)}")
+                        print(f"        Weighted Leverage: {weighted_leverage:.4f}")
                     
                     asset_depths[asset].append({
                         'miner': miner_hotkey,
