@@ -95,6 +95,48 @@ You'll be prompted for the following credentials:
   Enter your MEXC API secret: <your-api-secret>
   ```
 
+## Configuring Asset Mappings
+
+The trade engine needs to know how to map asset symbols from different signal sources to a unified format. Run the asset mapping configuration script:
+
+```bash
+cd $HOME/trading-engine
+source .venv/bin/activate
+python3 config/asset_mapping.py
+```
+
+For each signal source (tradingview and bittensor), you'll be shown current mappings and prompted to:
+
+1. Enter the source asset symbol (e.g., ETHUSD for Bittensor or ETHUSDT for TradingView):
+   ```
+   Configuring mappings for bittensor
+   Enter source asset symbol (e.g., ETHUSD) or press Enter to finish:
+   ```
+
+2. Enter the translated (unified) symbol. If a mapping already exists, you can press Enter to keep the current value:
+   ```
+   Enter translated asset symbol for ETHUSD (press Enter for current value: ETHUSDT):
+   ```
+
+3. Repeat for each asset you want to map, or press Enter without input to move to the next signal source.
+
+The configuration will be saved to `asset_mapping_config.json`. Example configuration file:
+
+```json
+{
+    "tradingview": {
+        "BTCUSDT": "BTCUSDT",
+        "ETHUSDT": "ETHUSDT"
+    },
+    "bittensor": {
+        "BTCUSD": "BTCUSDT",
+        "ETHUSD": "ETHUSDT"
+    }
+}
+```
+
+After configuration, a summary will be displayed showing all configured mappings for each signal source.
+
 ## Configuring Signal Weights
 
 The trade engine uses weights to determine how much influence each signal source has for each trading pair. Run the configuration script:
