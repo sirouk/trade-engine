@@ -107,28 +107,33 @@ python3 config/asset_mapping.py
 
 For each signal source (tradingview and bittensor), the configuration process will:
 
-1. Show existing mappings (if any) and ask if you want to keep them:
+1. Show existing mappings (if any) and ask what to do with them:
    ```
    Current mappings for bittensor:
      BTCUSD -> BTCUSDT
      ETHUSD -> ETHUSDT
 
-   Would you like to keep these existing mappings? (y/n):
+   What would you like to do with existing mappings?
+     k - keep all existing mappings
+     m - modify existing mappings one by one
+     n - start fresh with no mappings
+   Choose (k/m/n):
    ```
 
-2. Prompt for new mappings:
+2. If you choose to modify ('m'), for each mapping you'll be asked:
    ```
-   Configuring mappings for bittensor
+   Current mapping: BTCUSD -> BTCUSDT
+   Keep/Modify/Remove (k/m/r)?
+   ```
+
+3. For new mappings or when modifying existing ones:
+   ```
    Enter source asset symbol (e.g., ETHUSD) or press Enter to finish:
-   ```
-
-3. For each symbol, enter the translated (unified) symbol:
-   ```
-   Enter translated asset symbol for ETHUSD:
    ```
 
 The configuration handles several special cases:
 
+- If you choose to modify a mapping, you'll be shown the current value and can enter a new one
 - If you enter a symbol that's already mapped, you'll be asked if you want to update it
 - If you map to a symbol that's already a target for another mapping, the old mapping will be removed to prevent duplicates
 - Pressing Enter without input moves to the next signal source

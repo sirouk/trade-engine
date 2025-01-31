@@ -30,26 +30,64 @@ def load_existing_config():
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
+def get_user_choice(prompt: str, valid_choices: list) -> str:
+    """Get a valid choice from the user."""
+    while True:
+        choice = input(prompt).strip().lower()
+        if choice in valid_choices:
+            return choice
+        print(f"Please enter one of: {', '.join(valid_choices)}")
+
+def modify_existing_mappings(source_mappings: OrderedDict) -> OrderedDict:
+    """Review and modify existing mappings one by one."""
+    modified_mappings = OrderedDict()
+    
+    print("\nReviewing existing mappings:")
+    print("For each mapping, choose:")
+    print("  k - keep the mapping as is")
+    print("  m - modify the mapping")
+    print("  r - remove the mapping")
+    
+    for source_symbol, translated_symbol in source_mappings.items():
+        print(f"\nCurrent mapping: {source_symbol} -> {translated_symbol}")
+        choice = get_user_choice("Keep/Modify/Remove (k/m/r)? ", ['k', 'm', 'r'])
+        
+        if choice == 'k':
+            modified_mappings[source_symbol] = translated_symbol
+        elif choice == 'm':
+            print(f"Enter new translated symbol for {source_symbol}")
+            print(f"(current value: {translated_symbol}):")
+            new_symbol = input().strip()
+            if new_symbol:
+                modified_mappings[source_symbol] = new_symbol
+            else:
+                modified_mappings[source_symbol] = translated_symbol
+    
+    return modified_mappings
+
 def prompt_for_mapping(source_name, existing_mappings=None):
     """Prompt user to input source and translated asset symbols."""
     mappings = OrderedDict()
     existing_mappings = existing_mappings or {}
     source_mappings = existing_mappings.get(source_name, OrderedDict())
     
-    # First, ask if we should keep existing mappings
+    # First, ask what to do with existing mappings
     if source_mappings:
         print(f"\nCurrent mappings for {source_name}:")
         for src, trans in source_mappings.items():
             print(f"  {src} -> {trans}")
         
-        while True:
-            keep = input("\nWould you like to keep these existing mappings? (y/n): ").strip().lower()
-            if keep in ('y', 'n'):
-                break
-            print("Please enter 'y' or 'n'")
+        print("\nWhat would you like to do with existing mappings?")
+        print("  k - keep all existing mappings")
+        print("  m - modify existing mappings one by one")
+        print("  n - start fresh with no mappings")
         
-        if keep == 'y':
+        choice = get_user_choice("Choose (k/m/n): ", ['k', 'm', 'n'])
+        
+        if choice == 'k':
             mappings.update(source_mappings)
+        elif choice == 'm':
+            mappings.update(modify_existing_mappings(source_mappings))
     
     while True:
         print(f"\nConfiguring mappings for {source_name}")
@@ -62,11 +100,7 @@ def prompt_for_mapping(source_name, existing_mappings=None):
         # Check if symbol already exists
         if source_symbol in mappings:
             print(f"Warning: {source_symbol} is already mapped to {mappings[source_symbol]}")
-            while True:
-                update = input("Would you like to update this mapping? (y/n): ").strip().lower()
-                if update in ('y', 'n'):
-                    break
-                print("Please enter 'y' or 'n'")
+            update = get_user_choice("Would you like to update this mapping? (y/n): ", ['y', 'n'])
             
             if update == 'n':
                 continue
