@@ -29,8 +29,15 @@ class TradingViewProcessor:
                 #"ADAUSDT": "ADAUSDT",
             }
 
+    def reload_asset_mapping(self):
+        """Reload asset mapping configuration."""
+        self.CORE_ASSET_MAPPING = self._load_asset_mapping()
+
     def fetch_signals(self):
         """Main entry point to fetch and process signals."""
+        # Reload asset mapping configuration before processing signals
+        self.reload_asset_mapping()
+        
         self._archive_old_files()
         recent_files = self._get_recent_files(self.RAW_SIGNALS_DIR)
         signals = {}

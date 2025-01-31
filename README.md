@@ -97,7 +97,7 @@ You'll be prompted for the following credentials:
 
 ## Configuring Asset Mappings
 
-The trade engine needs to know how to map asset symbols from different signal sources to a unified format. Run the asset mapping configuration script:
+The trade engine needs to know how to map asset symbols from different signal sources to a unified format. For example, Bittensor might use "BTCUSD" while TradingView uses "BTCUSDT" for the same asset. Run the asset mapping configuration script:
 
 ```bash
 cd $HOME/trade-engine
@@ -105,20 +105,34 @@ source .venv/bin/activate
 python3 config/asset_mapping.py
 ```
 
-For each signal source (tradingview and bittensor), you'll be shown current mappings and prompted to:
+For each signal source (tradingview and bittensor), the configuration process will:
 
-1. Enter the source asset symbol (e.g., ETHUSD for Bittensor or ETHUSDT for TradingView):
+1. Show existing mappings (if any) and ask if you want to keep them:
+   ```
+   Current mappings for bittensor:
+     BTCUSD -> BTCUSDT
+     ETHUSD -> ETHUSDT
+
+   Would you like to keep these existing mappings? (y/n):
+   ```
+
+2. Prompt for new mappings:
    ```
    Configuring mappings for bittensor
    Enter source asset symbol (e.g., ETHUSD) or press Enter to finish:
    ```
 
-2. Enter the translated (unified) symbol. If a mapping already exists, you can press Enter to keep the current value:
+3. For each symbol, enter the translated (unified) symbol:
    ```
-   Enter translated asset symbol for ETHUSD (press Enter for current value: ETHUSDT):
+   Enter translated asset symbol for ETHUSD:
    ```
 
-3. Repeat for each asset you want to map, or press Enter without input to move to the next signal source.
+The configuration handles several special cases:
+
+- If you enter a symbol that's already mapped, you'll be asked if you want to update it
+- If you map to a symbol that's already a target for another mapping, the old mapping will be removed to prevent duplicates
+- Pressing Enter without input moves to the next signal source
+- For existing mappings, pressing Enter keeps the current value
 
 The configuration will be saved to `asset_mapping_config.json`. Example configuration file:
 
@@ -134,6 +148,11 @@ The configuration will be saved to `asset_mapping_config.json`. Example configur
     }
 }
 ```
+
+The configuration maintains the order of mappings:
+- Existing mappings (if kept) appear first in their original order
+- New mappings appear in the order they were entered
+- Each signal source maintains its own ordered list of mappings
 
 After configuration, a summary will be displayed showing all configured mappings for each signal source.
 
@@ -167,12 +186,17 @@ The configuration will be saved to `signal_weight_config.json`. After configurat
 
 Different types of configuration changes require different service restarts:
 
-1. **Signal Weight Changes** (`signal_weight_config.json`):
+1. **Asset Mapping Changes** (`asset_mapping_config.json`):
+   - Changes are picked up dynamically by all components
+   - No restart required
+   - Takes effect in the next processing cycle
+
+2. **Signal Weight Changes** (`signal_weight_config.json`):
    - Changes are picked up dynamically by the trade engine
    - No restart required
    - Takes effect in the next trade engine loop
 
-2. **Signal Processor Configuration**:
+3. **Signal Processor Configuration**:
    - Changes to processor class files (e.g., `bittensor_processor.py`):
      - Requires restart of the respective signal processor service
      - Run: `pm2 restart bittensor-signals` for Bittensor changes
@@ -180,7 +204,11 @@ Different types of configuration changes require different service restarts:
      - Requires trade engine restart
      - Run: `pm2 restart trade-engine`
 
-Example configuration file:
+4. **Credentials Changes** (`credentials.json`):
+   - Requires restart of affected services
+   - Run appropriate restart commands (e.g., `pm2 restart trade-engine`)
+
+Example signal weight configuration file:
 
 ```json
 [

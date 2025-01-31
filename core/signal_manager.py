@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class SignalManager:
     CACHE_FILE = "account_asset_depths.json"
     CONFIG_FILE = "signal_weight_config.json"
+    ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     SIGNAL_PROCESSORS_DIR = "signal_processors"
     ACCOUNT_PROCESSORS_DIR = "account_processors"
     
@@ -23,6 +24,7 @@ class SignalManager:
         self._load_cache()
         self._initialize_processors()
         self.processors = self.signal_processors  # For compatibility with existing code
+        self._last_asset_mapping_check = 0  # Track last time we checked asset mapping config
     
     def _load_config(self) -> dict:
         """Load signal weight configuration."""
@@ -79,8 +81,31 @@ class SignalManager:
                 except Exception as e:
                     logger.error(f"Error loading account processor from {filename}: {e}")
     
+    def _should_reload_asset_mapping(self) -> bool:
+        """Check if we should reload asset mapping configuration."""
+        try:
+            current_time = os.path.getmtime(self.ASSET_MAPPING_CONFIG)
+            if current_time > self._last_asset_mapping_check:
+                self._last_asset_mapping_check = current_time
+                return True
+        except OSError:
+            # If file doesn't exist or can't be accessed, don't reload
+            pass
+        return False
+
+    def _reload_asset_mappings(self):
+        """Reload asset mappings in all signal processors."""
+        for processor in self.signal_processors.values():
+            if hasattr(processor, 'reload_asset_mapping'):
+                processor.reload_asset_mapping()
+    
     def check_for_updates(self, accounts=None) -> Dict[str, bool]:
         """Check for updates and calculate new depths."""
+        # Check if asset mappings need to be reloaded
+        if self._should_reload_asset_mapping():
+            logger.info("Asset mapping configuration changed, reloading...")
+            self._reload_asset_mappings()
+
         updates = {}
         new_depths = {}
         current_signals = {}

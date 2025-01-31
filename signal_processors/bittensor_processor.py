@@ -70,8 +70,15 @@ class BittensorProcessor:
                 "ETHUSD": "ETHUSDT",
             }
         
+    def reload_asset_mapping(self):
+        """Reload asset mapping configuration."""
+        self.CORE_ASSET_MAPPING = self._load_asset_mapping()
+        
     async def prepare_signals(self, verbose=False):
         """Fetch, process, and store signals from ranked miners."""
+        # Reload asset mapping configuration before processing signals
+        self.reload_asset_mapping()
+        
         # Get raw signals and rank miners
         positions_data = await self._fetch_raw_signals()
         if not positions_data:

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from collections import defaultdict
 import asyncio
+import os
 
 from signal_processors.tradingview_processor import TradingViewProcessor
 from signal_processors.bittensor_processor import BittensorProcessor
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 class TradeExecutor:
     sleep_time = 0.5
+    ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     
     def _load_weight_config(self) -> bool:
         """Load signal weight configuration from file. Returns True if successful."""
@@ -45,6 +47,9 @@ class TradeExecutor:
         # Initialize signal manager
         self.signal_manager = SignalManager()
 
+        # Track last time we checked asset mapping config
+        self._last_asset_mapping_check = 0
+
         # Initialize processors with enabled state based on non-zero weights
         self.bittensor_processor = BittensorProcessor(
             enabled=any(any(s['weight'] > 0 for s in symbol['sources'] 
@@ -64,10 +69,34 @@ class TradeExecutor:
             KuCoin(),
             MEXC()
         ]
+
+    def _should_reload_asset_mapping(self) -> bool:
+        """Check if we should reload asset mapping configuration."""
+        try:
+            current_time = os.path.getmtime(self.ASSET_MAPPING_CONFIG)
+            if current_time > self._last_asset_mapping_check:
+                self._last_asset_mapping_check = current_time
+                return True
+        except OSError:
+            # If file doesn't exist or can't be accessed, don't reload
+            pass
+        return False
+
+    def _reload_asset_mappings(self):
+        """Reload asset mappings in signal processors."""
+        if hasattr(self.bittensor_processor, 'reload_asset_mapping'):
+            self.bittensor_processor.reload_asset_mapping()
+        if hasattr(self.tradingview_processor, 'reload_asset_mapping'):
+            self.tradingview_processor.reload_asset_mapping()
         
     async def get_signals(self) -> Dict:
         """Fetch and combine signals from all sources."""
         try:
+            # Check if asset mappings need to be reloaded
+            if self._should_reload_asset_mapping():
+                logger.info("Asset mapping configuration changed, reloading...")
+                self._reload_asset_mappings()
+
             # Check for updates in signal sources
             updates = self.signal_manager.check_for_updates(self.accounts)
             logger.info(f"Checking for updates: {updates}")
