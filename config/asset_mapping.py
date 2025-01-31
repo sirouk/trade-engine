@@ -1,5 +1,5 @@
 import ujson as json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from signal_processors.tradingview_processor import TradingViewProcessor
 from signal_processors.bittensor_processor import BittensorProcessor
 
