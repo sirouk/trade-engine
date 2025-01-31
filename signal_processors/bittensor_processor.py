@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import ujson
 import os
+import argparse
 from datetime import datetime, timedelta, UTC
 from config.credentials import load_bittensor_credentials
 import zipfile
@@ -31,32 +32,32 @@ class BittensorProcessor:
     SIGNAL_FILE_PREFIX = "bittensor_signal"
     SIGNAL_FREQUENCY = 1  # seconds between signal preparations
     ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
+    PROCESSOR_CONFIG = "bittensor_processor_config.json"
     
-    LEVERAGE_LIMIT_CRYPTO = 0.5
-
-    # Filtering thresholds
-    MIN_TRADES = 10                    # Minimum number of trades required
-    MAX_DRAWDOWN_THRESHOLD = -0.5      # Maximum allowed drawdown (-0.5 = -50%)
-    MIN_PROFITABLE_RATE = 0.6          # Minimum rate of profitable trades (60%)
-    MIN_TOTAL_RETURN = 0.0             # Minimum total return (0 = breakeven)
-    
-    # Scoring weights
-    DRAWDOWN_EXPONENT = 6              # Exponent for drawdown penalty
-    SHARPE_EXPONENT = 2                # Exponent for Sharpe ratio
-    PROFITABLE_RATE_EXPONENT = 5       # Exponent for profitable trade rate
-    POSITION_COUNT_DIVISOR = 5         # Divisor for position count bonus (1/5 = max 20% bonus)
-    
-    # Asset filtering
-    MIN_TRADES_PER_ASSET = 0           # Minimum trades required per asset
-    MAX_TRADE_AGE_DAYS = 14            # Maximum age of latest trade in days
-
     def __init__(self, *, enabled=True):
         self.credentials = load_bittensor_credentials()
         self.enabled = enabled
         self.miner_count_cache_filename = "miner_count_cache.txt"
         self.miner_count_cache_path = os.path.join(self.RAW_SIGNALS_DIR, self.miner_count_cache_filename)
         self.CORE_ASSET_MAPPING = self._load_asset_mapping()
+        self._last_config_check = 0
         
+        # Default configuration values
+        self.min_trades = 10
+        self.max_drawdown_threshold = -0.5
+        self.min_profitable_rate = 0.6
+        self.min_total_return = 0.0
+        self.drawdown_exponent = 6
+        self.sharpe_exponent = 2
+        self.profitable_rate_exponent = 5
+        self.position_count_divisor = 5
+        self.min_trades_per_asset = 0
+        self.max_trade_age_days = 14
+        self.leverage_limit_crypto = 0.5
+        
+        # Load configuration from file if it exists
+        self._load_processor_config()
+
     def _load_asset_mapping(self):
         """Load asset mapping from configuration file."""
         try:
@@ -74,8 +75,29 @@ class BittensorProcessor:
         """Reload asset mapping configuration."""
         self.CORE_ASSET_MAPPING = self._load_asset_mapping()
         
+    def _should_reload_config(self):
+        """Check if the processor configuration file has been modified."""
+        try:
+            if not os.path.exists(self.PROCESSOR_CONFIG):
+                return False
+            
+            current_mtime = os.path.getmtime(self.PROCESSOR_CONFIG)
+            if current_mtime > self._last_config_check:
+                self._last_config_check = current_mtime
+                return True
+                
+            return False
+        except Exception as e:
+            logger.error(f"Error checking processor config modification time: {e}")
+            return False
+
     async def prepare_signals(self, verbose=False):
         """Fetch, process, and store signals from ranked miners."""
+        # Check for configuration changes
+        if self._should_reload_config():
+            logger.info("Processor configuration file changed, reloading settings...")
+            self._load_processor_config()
+        
         # Reload asset mapping configuration before processing signals
         self.reload_asset_mapping()
         
@@ -397,8 +419,8 @@ class BittensorProcessor:
                
                 net_pos, avg_price = self._compute_net_position_and_average_price(position_data["orders"])
                     
-                capped_leverage = min(net_pos, self.LEVERAGE_LIMIT_CRYPTO)
-                normalized_depth = (capped_leverage / self.LEVERAGE_LIMIT_CRYPTO) * allocation_weight
+                capped_leverage = min(net_pos, self.leverage_limit_crypto)
+                normalized_depth = (capped_leverage / self.leverage_limit_crypto) * allocation_weight
                 
                 latest_order_ms = max(order['processed_ms'] for order in position_data['orders'])
                 latest_order_tstamp = datetime.fromtimestamp(latest_order_ms / 1000, UTC).strftime("%Y-%m-%d %H:%M:%S")
@@ -567,17 +589,17 @@ class BittensorProcessor:
                     latest_trade = max(latest_trade, position["close_ms"])
                     total_trades += 1
             
-            if self.MIN_TRADES_PER_ASSET > 0:
+            if self.min_trades_per_asset > 0:
                 skip = False
                 for asset in asset_list:
-                    if asset_trades.get(asset, 0) < self.MIN_TRADES_PER_ASSET:
+                    if asset_trades.get(asset, 0) < self.min_trades_per_asset:
                         skip = True
                         break
                 if skip:
                     continue
             
-            if self.MAX_TRADE_AGE_DAYS < float('inf'):
-                if latest_trade < datetime.now(UTC).timestamp() * 1000 - self.MAX_TRADE_AGE_DAYS * 24 * 60 * 60 * 1000:
+            if self.max_trade_age_days < float('inf'):
+                if latest_trade < datetime.now(UTC).timestamp() * 1000 - self.max_trade_age_days * 24 * 60 * 60 * 1000:
                     continue
             
             filtered_positions = [
@@ -627,7 +649,7 @@ class BittensorProcessor:
             max_drawdown = self.calculate_max_drawdown_from_positions(miner['positions'])
             
             # Skip miners with extreme drawdowns
-            if max_drawdown < self.MAX_DRAWDOWN_THRESHOLD:
+            if max_drawdown < self.max_drawdown_threshold:
                 continue
             
             # Process each position for returns and profitability
@@ -645,11 +667,11 @@ class BittensorProcessor:
                 total_trades += 1
             
             # Apply minimum trade requirement
-            if total_trades < self.MIN_TRADES:
+            if total_trades < self.min_trades:
                 continue
                 
             percentage_profitable = profitable_trades / total_trades
-            if percentage_profitable < self.MIN_PROFITABLE_RATE:
+            if percentage_profitable < self.min_profitable_rate:
                 continue
                 
             # Calculate metrics
@@ -659,7 +681,7 @@ class BittensorProcessor:
             total_return = sum(position_returns)
             
             # Skip if below minimum return
-            if total_return <= self.MIN_TOTAL_RETURN:
+            if total_return <= self.min_total_return:
                 continue
             
             metrics_data.append({
@@ -696,7 +718,7 @@ class BittensorProcessor:
             return_score = 1.0 + metrics['total_return']
             
             # Calculate position count bonus
-            position_count_bonus = np.log1p(metrics['position_count']) / self.POSITION_COUNT_DIVISOR
+            position_count_bonus = np.log1p(metrics['position_count']) / self.position_count_divisor
             
             normalized = {
                 'hotkey': miner_data['hotkey'],
@@ -710,10 +732,10 @@ class BittensorProcessor:
             
             # Calculate total score with configured weights
             normalized['total_score'] = float(
-                normalized['max_drawdown']**self.DRAWDOWN_EXPONENT +
-                normalized['sharpe_ratio']**self.SHARPE_EXPONENT +
+                normalized['max_drawdown']**self.drawdown_exponent +
+                normalized['sharpe_ratio']**self.sharpe_exponent +
                 normalized['total_return'] +
-                normalized['percentage_profitable']**self.PROFITABLE_RATE_EXPONENT +
+                normalized['percentage_profitable']**self.profitable_rate_exponent +
                 normalized['position_count'] * position_count_bonus +
                 normalized['consistency_score']
             )
@@ -951,6 +973,80 @@ class BittensorProcessor:
                 
         return None
 
+    def _load_processor_config(self):
+        """Load processor configuration from file or use defaults."""
+        try:
+            with open(self.PROCESSOR_CONFIG, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+                self.min_trades = config_data.get('min_trades', self.min_trades)
+                self.max_drawdown_threshold = config_data.get('max_drawdown_threshold', self.max_drawdown_threshold)
+                self.min_profitable_rate = config_data.get('min_profitable_rate', self.min_profitable_rate)
+                self.min_total_return = config_data.get('min_total_return', self.min_total_return)
+                self.drawdown_exponent = config_data.get('drawdown_exponent', self.drawdown_exponent)
+                self.sharpe_exponent = config_data.get('sharpe_exponent', self.sharpe_exponent)
+                self.profitable_rate_exponent = config_data.get('profitable_rate_exponent', self.profitable_rate_exponent)
+                self.position_count_divisor = config_data.get('position_count_divisor', self.position_count_divisor)
+                self.min_trades_per_asset = config_data.get('min_trades_per_asset', self.min_trades_per_asset)
+                self.max_trade_age_days = config_data.get('max_trade_age_days', self.max_trade_age_days)
+                self.leverage_limit_crypto = config_data.get('leverage_limit_crypto', self.leverage_limit_crypto)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass  # Use default values if file doesn't exist or is invalid
+
+    def save_processor_config(self):
+        """Save current processor configuration to file."""
+        config_data = {
+            'min_trades': self.min_trades,
+            'max_drawdown_threshold': self.max_drawdown_threshold,
+            'min_profitable_rate': self.min_profitable_rate,
+            'min_total_return': self.min_total_return,
+            'drawdown_exponent': self.drawdown_exponent,
+            'sharpe_exponent': self.sharpe_exponent,
+            'profitable_rate_exponent': self.profitable_rate_exponent,
+            'position_count_divisor': self.position_count_divisor,
+            'min_trades_per_asset': self.min_trades_per_asset,
+            'max_trade_age_days': self.max_trade_age_days,
+            'leverage_limit_crypto': self.leverage_limit_crypto
+        }
+        with open(self.PROCESSOR_CONFIG, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=4)
+
+    def configure(self):
+        """Interactive configuration of processor parameters."""
+        print("\nBittensor Processor Configuration")
+        print("================================")
+        
+        # Filtering thresholds
+        print("\nFiltering Thresholds:")
+        self.min_trades = int(input(f"Minimum trades required ({self.min_trades}): ") or self.min_trades)
+        self.max_drawdown_threshold = float(input(f"Maximum drawdown threshold ({self.max_drawdown_threshold}): ") or self.max_drawdown_threshold)
+        self.min_profitable_rate = float(input(f"Minimum profitable rate ({self.min_profitable_rate}): ") or self.min_profitable_rate)
+        self.min_total_return = float(input(f"Minimum total return ({self.min_total_return}): ") or self.min_total_return)
+        
+        # Scoring weights
+        print("\nScoring Weights:")
+        self.drawdown_exponent = int(input(f"Drawdown exponent ({self.drawdown_exponent}): ") or self.drawdown_exponent)
+        self.sharpe_exponent = int(input(f"Sharpe ratio exponent ({self.sharpe_exponent}): ") or self.sharpe_exponent)
+        self.profitable_rate_exponent = int(input(f"Profitable rate exponent ({self.profitable_rate_exponent}): ") or self.profitable_rate_exponent)
+        self.position_count_divisor = int(input(f"Position count divisor ({self.position_count_divisor}): ") or self.position_count_divisor)
+        
+        # Asset filtering
+        print("\nAsset Filtering:")
+        self.min_trades_per_asset = int(input(f"Minimum trades per asset ({self.min_trades_per_asset}): ") or self.min_trades_per_asset)
+        self.max_trade_age_days = int(input(f"Maximum trade age in days ({self.max_trade_age_days}): ") or self.max_trade_age_days)
+        
+        # Trading limits
+        print("\nTrading Limits:")
+        self.leverage_limit_crypto = float(input(f"Leverage limit for crypto ({self.leverage_limit_crypto}): ") or self.leverage_limit_crypto)
+        
+        # Save configuration
+        self.save_processor_config()
+        print("\nConfiguration saved successfully!")
+
+    def add_arguments(self, parser):
+        """Add processor-specific arguments to argument parser."""
+        parser.add_argument('--config', action='store_true',
+                          help='Configure Bittensor processor parameters')
+
 # Example standalone usage
 if __name__ == '__main__':
     # Use the keys from CORE_ASSET_MAPPING
@@ -966,6 +1062,13 @@ if __name__ == '__main__':
     #resulting_signals = processor.fetch_signals()
     #print(resulting_signals)
     
-    # Initialize processor and run the signal loop
+    parser = argparse.ArgumentParser(description='Bittensor Signal Processor')
     processor = BittensorProcessor(enabled=True)
-    asyncio.run(processor.run_signal_loop())
+    processor.add_arguments(parser)
+    args = parser.parse_args()
+    
+    if args.config:
+        processor.configure()
+    else:
+        # Initialize processor and run the signal loop
+        asyncio.run(processor.run_signal_loop())
