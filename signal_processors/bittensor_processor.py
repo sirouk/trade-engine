@@ -123,12 +123,13 @@ class BittensorProcessor:
             return {}
 
         if verbose:
-            print("\n=== Qualified Miners ===")
+            print("\n=== Qualified Miners and Their Positions ===")
             for rank, miner in enumerate(ranked_miners, 1):
                 print(f"\nRank #{rank} - Miner: {miner['hotkey']}")
-                print(f"Total Score: {miner['total_score']:.4f}")
-                print(f"Profitability: {miner['percentage_profitable']*100:.2f}%")
-                print(f"Sharpe Ratio: {miner['sharpe_ratio']:.4f}")
+                print(f"Overall Metrics:")
+                print(f"  Total Score: {miner['total_score']:.4f}")
+                print(f"  Profitability: {miner['percentage_profitable']*100:.2f}%")
+                print(f"  Sharpe Ratio: {miner['sharpe_ratio']:.4f}")
 
         # Calculate gradient allocation weights for miners
         allocations = self._calculate_gradient_allocation(len(ranked_miners))
@@ -157,7 +158,8 @@ class BittensorProcessor:
             miner_positions = positions_data[miner_hotkey]['positions']
 
             if verbose:
-                print(f"\n=== Miner {miner_hotkey} (Rank {rank}) Positions ===")
+                print(f"\nProcessing Miner {miner_hotkey} (Rank {rank}):")
+                print(f"  Weight: {miner_weight:.4f}")
 
             # Group positions by asset
             for position in miner_positions:
@@ -173,12 +175,11 @@ class BittensorProcessor:
                     weighted_leverage = net_pos * miner_weight
                     
                     if verbose:
-                        print(f"\n{asset}:")
-                        print(f"  Net Position: {net_pos:.4f}")
-                        print(f"  Average Price: ${avg_price:.2f}")
-                        print(f"  Trade Count: {len(orders)}")
-                        print(f"  Miner Weight: {miner_weight:.4f}")
-                        print(f"  Weighted Leverage: {weighted_leverage:.4f}")
+                        print(f"  Position in {asset}:")
+                        print(f"    Net Position: {net_pos:.4f}")
+                        print(f"    Average Price: ${avg_price:.2f}")
+                        print(f"    Trade Count: {len(orders)}")
+                        print(f"    Weighted Leverage: {weighted_leverage:.4f}")
                     
                     asset_depths[asset].append({
                         'miner': miner_hotkey,
@@ -191,7 +192,7 @@ class BittensorProcessor:
         # Combine miner positions into final signals
         signals = {}
         if verbose:
-            print("\n=== Final Asset Signals ===")
+            print("\n=== Final Combined Signals ===")
             
         for asset, positions in asset_depths.items():
             if not positions:
@@ -236,10 +237,11 @@ class BittensorProcessor:
                 print(f"  Average Price: ${weighted_price:.2f}")
                 print(f"  Latest Update: {datetime.fromtimestamp(timestamp/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
                 print(f"  Contributing Miners: {len(positions)}")
-                print("  Individual Contributions:")
-                for pos in positions:
-                    print(f"    {pos['miner']}: leverage={pos['leverage']:.4f}, "
-                          f"weight={pos['weight']:.4f}, trades={pos['trade_count']}")
+                if positions:  # Only show contributions if there are any
+                    print("  Individual Contributions:")
+                    for pos in positions:
+                        print(f"    {pos['miner']}: leverage={pos['leverage']:.4f}, "
+                              f"weight={pos['weight']:.4f}, trades={pos['trade_count']}")
 
         # Ensure all mapped assets have an entry
         for mapped_asset in self.CORE_ASSET_MAPPING.values():
