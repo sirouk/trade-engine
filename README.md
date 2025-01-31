@@ -201,7 +201,23 @@ Different types of configuration changes require different service restarts:
    - No restart required
    - Takes effect in the next trade engine loop
 
-3. **Signal Processor Configuration**:
+3. **Bittensor Processor Configuration** (`bittensor_processor_config.json`):
+   - Configuration parameters can be modified through the command line interface:
+     ```bash
+     cd $HOME/trade-engine
+     source .venv/bin/activate
+     python3 signal_processors/bittensor_processor.py --config
+     ```
+   - Changes are picked up dynamically by the processor
+   - No restart required
+   - Takes effect in the next signal processing cycle
+   - Configurable parameters include:
+     - Filtering thresholds (min trades, drawdown, profitability)
+     - Scoring weights (drawdown, Sharpe ratio, profitability)
+     - Asset filtering (min trades per asset, max trade age)
+     - Trading limits (leverage limits)
+
+4. **Signal Processor Code Changes**:
    - Changes to processor class files (e.g., `bittensor_processor.py`):
      - Requires restart of the respective signal processor service
      - Run: `pm2 restart bittensor-signals` for Bittensor changes
@@ -209,7 +225,7 @@ Different types of configuration changes require different service restarts:
      - Requires trade engine restart
      - Run: `pm2 restart trade-engine`
 
-4. **Credentials Changes** (`credentials.json`):
+5. **Credentials Changes** (`credentials.json`):
    - Requires restart of affected services
    - Run appropriate restart commands (e.g., `pm2 restart trade-engine`)
 

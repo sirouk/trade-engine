@@ -29,6 +29,23 @@ Different types of configuration changes require different service restarts:
    - No service restarts required
    - Takes effect in the next trade engine loop
 
+4. **Bittensor Processor Configuration**:
+   - Configuration stored in `bittensor_processor_config.json`
+   - Can be modified through interactive configuration:
+     ```bash
+     cd $HOME/trade-engine
+     source .venv/bin/activate
+     python3 signal_processors/bittensor_processor.py --config
+     ```
+   - Changes are detected and applied automatically
+   - No restart required
+   - Takes effect in the next signal processing cycle
+   - Configurable parameters include:
+     - Filtering thresholds (min trades, drawdown, profitability)
+     - Scoring weights (drawdown, Sharpe ratio, profitability)
+     - Asset filtering (min trades per asset, max trade age)
+     - Trading limits (leverage limits)
+
 ## TradingView Processor
 
 The TradingView processor (`tradingview_processor.py`) is not run directly by PM2. Instead, it is used by the TradingView endpoint (`tradingview_endpoint.py`) which receives webhooks from TradingView. For setup and configuration of the TradingView endpoint, see the [TradingView Endpoint Documentation](../signal_endpoints/README.md).
@@ -40,6 +57,39 @@ The Bittensor signal processor fetches and processes signals from the Bittensor 
 - Prepares signals at regular intervals (every 60 seconds)
 - Stores signals to disk with atomic operations
 - Automatically archives old signal files
+- Dynamically reloads configuration changes
+
+### Configuration
+
+The processor can be configured through an interactive interface:
+
+```bash
+cd $HOME/trade-engine
+source .venv/bin/activate
+python3 signal_processors/bittensor_processor.py --config
+```
+
+This allows you to configure:
+1. **Filtering Thresholds**:
+   - Minimum required trades
+   - Maximum drawdown threshold
+   - Minimum profitable rate
+   - Minimum total return
+
+2. **Scoring Weights**:
+   - Drawdown exponent
+   - Sharpe ratio exponent
+   - Profitable rate exponent
+   - Position count divisor
+
+3. **Asset Filtering**:
+   - Minimum trades per asset
+   - Maximum trade age in days
+
+4. **Trading Limits**:
+   - Leverage limit for crypto
+
+Configuration is stored in `bittensor_processor_config.json` and is automatically reloaded when changes are detected, requiring no service restart.
 
 ### Starting the Processor
 
