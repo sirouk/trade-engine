@@ -44,7 +44,7 @@ You should now have all required dependencies from the `pyproject.toml`.
 If you need to cleanup and reinstall packages:
 
 ```bash
-cd $HOME/trading-engine
+cd $HOME/trade-engine
 deactivate;
 rm -rf .venv
 ```
@@ -56,7 +56,7 @@ Before running the trade engine, you'll need to configure your exchange API cred
 To set up the credentials, run the following command, which will prompt you to enter your API key(s):
 
 ```bash
-cd $HOME/trading-engine
+cd $HOME/trade-engine
 source .venv/bin/activate
 python3 config/credentials.py
 ```
@@ -100,7 +100,7 @@ You'll be prompted for the following credentials:
 The trade engine needs to know how to map asset symbols from different signal sources to a unified format. Run the asset mapping configuration script:
 
 ```bash
-cd $HOME/trading-engine
+cd $HOME/trade-engine
 source .venv/bin/activate
 python3 config/asset_mapping.py
 ```
@@ -142,7 +142,7 @@ After configuration, a summary will be displayed showing all configured mappings
 The trade engine uses weights to determine how much influence each signal source has for each trading pair. Run the configuration script:
 
 ```bash
-cd $HOME/trading-engine
+cd $HOME/trade-engine
 source .venv/bin/activate
 python3 config/signal_weights.py
 ```
@@ -233,7 +233,7 @@ First, start the signal processors. See the respective documentation for detaile
 Then, run the trade engine manually to verify everything is working:
 
 ```bash
-cd $HOME/trading-engine
+cd $HOME/trade-engine
 source .venv/bin/activate
 python3 execute_trades.py
 ```
