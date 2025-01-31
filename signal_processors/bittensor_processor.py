@@ -140,6 +140,16 @@ class BittensorProcessor:
         # Initialize asset depths
         asset_depths = {asset: [] for asset in assets_to_trade}
 
+        # Get current processing timestamp
+        current_timestamp = int(datetime.now(UTC).timestamp() * 1000)
+
+        # Get last known signals to compare for changes
+        last_signals = {}
+        for asset in self.CORE_ASSET_MAPPING.values():
+            last_signal = self.fetch_last_signal(asset)
+            if last_signal:
+                last_signals[asset] = last_signal
+
         # Process each ranked miner's positions
         for rank, miner_data in enumerate(ranked_miners, 1):
             miner_hotkey = miner_data['hotkey']
@@ -160,7 +170,6 @@ class BittensorProcessor:
                 net_pos, avg_price = self._compute_net_position_and_average_price(orders)
                 
                 if net_pos != 0:  # Only include non-zero positions
-                    timestamp = max(order['processed_ms'] for order in orders)
                     weighted_leverage = net_pos * miner_weight
                     
                     if verbose:
@@ -170,14 +179,12 @@ class BittensorProcessor:
                         print(f"  Trade Count: {len(orders)}")
                         print(f"  Miner Weight: {miner_weight:.4f}")
                         print(f"  Weighted Leverage: {weighted_leverage:.4f}")
-                        print(f"  Last Update: {datetime.fromtimestamp(timestamp/1000, UTC).strftime('%Y-%m-%d %H:%M:%S %p')} UTC")
                     
                     asset_depths[asset].append({
                         'miner': miner_hotkey,
                         'weight': miner_weight,
                         'leverage': net_pos,
                         'price': avg_price,
-                        'timestamp': timestamp,
                         'trade_count': len(orders)
                     })
 
@@ -196,9 +203,6 @@ class BittensorProcessor:
             # Cap the total leverage at 1.0 or -1.0
             capped_leverage = max(min(total_weighted_leverage, 1.0), -1.0)
             
-            # Get the most recent timestamp
-            latest_timestamp = max(pos['timestamp'] for pos in positions)
-            
             # Calculate weighted average price
             total_weight = sum(abs(pos['leverage'] * pos['weight']) for pos in positions)
             weighted_price = (
@@ -208,34 +212,44 @@ class BittensorProcessor:
 
             # Use the mapped symbol for storage
             mapped_asset = self.CORE_ASSET_MAPPING[asset]
+            
+            # Check if signal has changed
+            last_signal = last_signals.get(mapped_asset, {})
+            last_depth = last_signal.get('depth', 0.0)
+            last_price = last_signal.get('price', 0.0)
+            
+            # Only update timestamp if depth or price has changed
+            timestamp = current_timestamp if (
+                abs(capped_leverage - last_depth) > 0 or  # Depth changed
+                abs(weighted_price - last_price) > 0  # Price changed
+            ) else last_signal.get('timestamp', current_timestamp)
+            
             signals[mapped_asset] = {
                 'depth': capped_leverage,
                 'price': weighted_price,
-                'timestamp': latest_timestamp
+                'timestamp': timestamp
             }
             
             if verbose:
                 print(f"\n{asset} -> {mapped_asset}:")
                 print(f"  Final Depth: {capped_leverage:.4f}")
                 print(f"  Average Price: ${weighted_price:.2f}")
-                print(f"  Latest Update: {datetime.fromtimestamp(latest_timestamp/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
+                print(f"  Latest Update: {datetime.fromtimestamp(timestamp/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
                 print(f"  Contributing Miners: {len(positions)}")
                 print("  Individual Contributions:")
                 for pos in positions:
                     print(f"    {pos['miner']}: leverage={pos['leverage']:.4f}, "
-                          f"weight={pos['weight']:.4f}, trades={pos['trade_count']}, "
-                          f"last_update={datetime.fromtimestamp(pos['timestamp']/1000, UTC).strftime('%Y-%m-%d %I:%M:%S %p')} UTC")
+                          f"weight={pos['weight']:.4f}, trades={pos['trade_count']}")
 
         # Ensure all mapped assets have an entry
-        current_time = int(datetime.now(UTC).timestamp() * 1000)
         for mapped_asset in self.CORE_ASSET_MAPPING.values():
             if mapped_asset not in signals:
                 # Get the last known signal for this asset
-                last_signal = self.fetch_last_signal(mapped_asset)
+                last_signal = last_signals.get(mapped_asset, {})
                 signals[mapped_asset] = {
                     'depth': 0.0, # Closed position
-                    'price': last_signal.get('price', 0.0) if last_signal else 0.0,
-                    'timestamp': last_signal.get('timestamp', current_time) if last_signal else current_time
+                    'price': last_signal.get('price', 0.0),
+                    'timestamp': last_signal.get('timestamp', current_timestamp)  # Keep old timestamp if no change
                 }
 
         # Store signals to disk and clean up old files
