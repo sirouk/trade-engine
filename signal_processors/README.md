@@ -7,7 +7,7 @@ This directory contains signal processors that fetch and process trading signals
 Before starting any processors, navigate to the project directory and activate the virtual environment:
 
 ```bash
-cd $HOME/trading-engine
+cd $HOME/trade-engine
 source .venv/bin/activate
 ```
 
