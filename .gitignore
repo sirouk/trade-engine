@@ -34,3 +34,4 @@ raw_signals/*/archive/*.zip
 
 # Keep the archive directories
 !raw_signals/*/archive/.gitkeep
+asset_mapping_config.json

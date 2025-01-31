@@ -8,16 +8,26 @@ class TradingViewProcessor:
     RAW_SIGNALS_DIR = "raw_signals/tradingview"
     ARCHIVE_DIR = "raw_signals/tradingview/archive"
     SIGNAL_FILE_PREFIX = "trade_requests"
+    ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     
-    CORE_ASSET_MAPPING = {
-        "BTCUSDT": "BTCUSDT",
-        "ETHUSDT": "ETHUSDT",
-        "ADAUSDT": "ADAUSDT",
-    }
-
     def __init__(self, *, enabled=True):
         self.enabled = enabled
         self.verbose = __name__ == '__main__'
+        self.CORE_ASSET_MAPPING = self._load_asset_mapping()
+
+    def _load_asset_mapping(self):
+        """Load asset mapping from configuration file."""
+        try:
+            with open(self.ASSET_MAPPING_CONFIG, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                return config.get(self.SIGNAL_SOURCE, {})
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Return default mapping if config file doesn't exist or is invalid
+            return {
+                "BTCUSDT": "BTCUSDT",
+                "ETHUSDT": "ETHUSDT",
+                #"ADAUSDT": "ADAUSDT",
+            }
 
     def fetch_signals(self):
         """Main entry point to fetch and process signals."""

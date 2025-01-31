@@ -30,12 +30,7 @@ class BittensorProcessor:
     ARCHIVE_DIR = "raw_signals/bittensor/archive"
     SIGNAL_FILE_PREFIX = "bittensor_signal"
     SIGNAL_FREQUENCY = 1  # seconds between signal preparations
-    
-    CORE_ASSET_MAPPING = {
-        "BTCUSD": "BTCUSDT",
-        "ETHUSD": "ETHUSDT",
-        "ADAUSD": "ADAUSDT"
-    }
+    ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     
     LEVERAGE_LIMIT_CRYPTO = 0.5
 
@@ -60,6 +55,20 @@ class BittensorProcessor:
         self.enabled = enabled
         self.miner_count_cache_filename = "miner_count_cache.txt"
         self.miner_count_cache_path = os.path.join(self.RAW_SIGNALS_DIR, self.miner_count_cache_filename)
+        self.CORE_ASSET_MAPPING = self._load_asset_mapping()
+        
+    def _load_asset_mapping(self):
+        """Load asset mapping from configuration file."""
+        try:
+            with open(self.ASSET_MAPPING_CONFIG, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                return config.get(self.SIGNAL_SOURCE, {})
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Return default mapping if config file doesn't exist or is invalid
+            return {
+                "BTCUSD": "BTCUSDT",
+                "ETHUSD": "ETHUSDT",
+            }
         
     async def prepare_signals(self, verbose=False):
         """Fetch, process, and store signals from ranked miners."""
