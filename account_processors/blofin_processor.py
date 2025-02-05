@@ -35,7 +35,8 @@ class BloFin:
             balance = await execute_with_timeout(
                 self.blofin_client.account.get_balance,
                 timeout=5,
-                account_type="futures",
+                #account_type="futures",
+                account_type="copy_trading", # "futures"
                 currency=instrument
             )
             # {'code': '0', 'msg': 'success', 'data': [{'currency': 'USDT', 'balance': '0.000000000000000000', 'available': '0.000000000000000000', 'frozen': '0.000000000000000000', 'bonus': '0.000000000000000000'}]}
@@ -51,7 +52,7 @@ class BloFin:
     async def fetch_all_open_positions(self):
         try:
             positions = await execute_with_timeout(
-                self.blofin_client.trading.get_positions,
+                self.blofin_client.trading.get_positions_ct,
                 timeout=5
             )
             return positions
@@ -61,7 +62,7 @@ class BloFin:
     async def fetch_open_positions(self, symbol):
         try:
             positions = await execute_with_timeout(
-                self.blofin_client.trading.get_positions,
+                self.blofin_client.trading.get_positions_ct,
                 timeout=5,
                 inst_id=symbol
             )
@@ -73,7 +74,7 @@ class BloFin:
     async def fetch_open_orders(self, symbol):
         try:
             orders = await execute_with_timeout(
-                self.blofin_client.trading.get_orders,
+                self.blofin_client.trading.get_active_orders_ct,
                 timeout=5,
                 inst_id=symbol
             )
@@ -86,7 +87,7 @@ class BloFin:
         """Fetch open positions from BloFin and convert them to UnifiedPosition objects."""
         try:
             response = await execute_with_timeout(
-                self.blofin_client.trading.get_positions,
+                self.blofin_client.trading.get_positions_ct,
                 timeout=5,
                 inst_id=symbol
             )
@@ -158,7 +159,7 @@ class BloFin:
         """Fetch instrument details including tick size and lot size."""
         try:
             instruments = await execute_with_timeout(
-                self.blofin_client.public.get_instruments,
+                self.blofin_client.public.get_instruments, # get_instruments_ct is not needed as it is the same as get_instruments
                 timeout=5,
                 inst_type="SWAP"
             )
@@ -202,7 +203,7 @@ class BloFin:
             #quit()
             
             order = await execute_with_timeout(
-                self.blofin_client.trading.place_order,
+                self.blofin_client.trading.place_order_ct,
                 timeout=5,
                 inst_id=symbol,
                 side=side.lower(),
@@ -233,7 +234,7 @@ class BloFin:
 
             # Place the market order
             order = await execute_with_timeout(
-                self.blofin_client.trading.place_order,
+                self.blofin_client.trading.place_order_ct,
                 timeout=5,
                 inst_id=symbol,
                 side=side.lower(),
@@ -274,18 +275,14 @@ class BloFin:
             # Place a market order in the opposite direction to close the position
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             order = await execute_with_timeout(
-                self.blofin_client.trading.place_order,
+                self.blofin_client.trading.close_positions_ct,
                 timeout=5,
                 inst_id=symbol,
-                side=side.lower(),
-                position_side=position["positionSide"],  # Ensure the same position mode
-                price=0, # required for market orders
-                size=size,
-                leverage=int(position["leverage"]),
-                order_type="market",  # Market order to close the position
                 margin_mode=position["marginMode"],  # Use the same margin mode
-                clientOrderId=client_order_id,
-                scale_lot_size=False  # Do not scale the lot size for closing
+                position_side=position["positionSide"],  # Ensure the same position mode
+                client_order_id=client_order_id,
+                close_type="pnl",
+                size=size
             )
 
             print(f"Position Closed: {order}")
@@ -314,11 +311,31 @@ class BloFin:
             current_margin_mode = current_position.margin_mode if current_position else None
             current_leverage = current_position.leverage if current_position else None
 
-            # Determine if we need to close the current position before opening a new one
+            # Handle position flips (long to short or vice versa)
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
                 print(f"Flipping position from {current_size} to {size}. Closing current position.")
                 await self.close_position(symbol)
                 current_size = 0
+            # Handle position size reduction
+            elif current_size != 0 and abs(size) < abs(current_size):
+                reduction_size = abs(current_size) - abs(size)
+                print(f"Reducing position size from {current_size} to {size} (reduction: {reduction_size})")
+                
+                # Determine side for reduction (opposite of current position)
+                side = "Sell" if current_size > 0 else "Buy"
+                
+                client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                await execute_with_timeout(
+                    self.blofin_client.trading.close_positions_ct,
+                    timeout=5,
+                    inst_id=symbol,
+                    margin_mode=current_margin_mode,
+                    position_side="net",  # Using net as we're in copy trading mode
+                    client_order_id=client_order_id,
+                    close_type="pnl",
+                    size=reduction_size
+                )
+                current_size = size
             
             # Check for margin mode or leverage changes
             if current_size != 0 and size != 0:
@@ -331,18 +348,20 @@ class BloFin:
                     
                     # no need to change margin mode here, as new position will be opened with the desired margin mode
 
-                if current_leverage != leverage:
-                    print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
-                    try:
-                        await execute_with_timeout(
-                            self.blofin_client.trading.set_leverage,
-                            timeout=5,
-                            inst_id=symbol,
-                            leverage=leverage,
-                            margin_mode=margin_mode,
-                        )
-                    except Exception as e:
-                        print(f"Failed to adjust leverage: {str(e)}")
+            # if leverage is different, or we are opening a new position, and not closing a position
+            if current_leverage != leverage and abs(current_size) != abs(size):
+                print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
+                try:
+                    await execute_with_timeout(
+                        self.blofin_client.trading.set_leverage_ct,
+                        timeout=5,
+                        inst_id=symbol,
+                        leverage=leverage,
+                        margin_mode=margin_mode,
+                        position_side="net"
+                    )
+                except Exception as e:
+                    print(f"Failed to adjust leverage: {str(e)}")
 
             # Calculate the remaining size difference after any position closure
             # Format to required decimal places and convert back to float
@@ -381,7 +400,7 @@ class BloFin:
                 try:
                     # Get instrument info
                     instrument = await execute_with_timeout(
-                        self.blofin_client.public.get_instruments,
+                        self.blofin_client.public.get_instruments, # get_instruments_ct is not needed as it is the same as get_instruments
                         timeout=5,
                         inst_type="SWAP"
                     )
@@ -449,6 +468,9 @@ async def main():
     
     # balance = await blofin.fetch_balance(instrument="USDT")      # Fetch futures balance
     # print(balance)
+    
+    #initial_account_value = await blofin.fetch_initial_account_value()
+    #print(f"Initial Account Value: {initial_account_value} USDT")
 
     # tickers = await blofin.fetch_tickers(symbol="BTC-USDT")  # Fetch market tickers
     # print(tickers)
@@ -468,19 +490,19 @@ async def main():
     # import time
     # time.sleep(5)
 
-    # Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
-    #await blofin.reconcile_position(
+    #Example usage of reconcile_position to adjust position to the desired size, leverage, and margin type
+    # await blofin.reconcile_position(
     #    symbol="BTC-USDT",   # Symbol to adjust
     #    size=0,  # Desired position size (positive for long, negative for short, zero to close)
-    #    leverage=5,         # Desired leverage
+    #    leverage=3,         # Desired leverage
     #    margin_mode="isolated"  # Desired margin mode
-    #)
+    # )
         
     # close_result = await blofin.close_position(symbol="BTC-USDT")
     # print(close_result)
     
-    # orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
-    # print(orders)   
+    #orders = await blofin.fetch_open_orders(symbol="BTC-USDT")          # Fetch open orders
+    #print(orders)   
     
     # #await blofin.fetch_open_positions(symbol="BTC-USDT")       # Fetch open positions
     # positions = await blofin.fetch_and_map_positions(symbol="BTC-USDT")
