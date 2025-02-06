@@ -33,6 +33,8 @@ class ByBit:
         }
 
         self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()}
+        
+        self.leverage_override = self.credentials.bybit.leverage_override
 
     async def fetch_balance(self, instrument="USDT"):
         try:
@@ -389,6 +391,11 @@ class ByBit:
         If the position flips from long to short or vice versa, the current position is closed first.
         """
         try:
+            # Use leverage override if set
+            if self.leverage_override > 0:
+                print(f"Using exchange-specific leverage override: {self.leverage_override}")
+                leverage = self.leverage_override
+                
             # Fetch current positions for the given symbol
             unified_positions = await self.fetch_and_map_positions(symbol, fetch_margin_mode=size != 0)
             current_position = unified_positions[0] if unified_positions else None
@@ -426,19 +433,19 @@ class ByBit:
                     except Exception as e:
                         print(f"Failed to adjust margin mode: {str(e)}")
 
-                if current_leverage != leverage:
-                    print(f"Adjusting leverage to {leverage}.")
-                    try:
-                        await execute_with_timeout(
-                            self.bybit_client.set_leverage,
-                            timeout=5,
-                            symbol=symbol,
-                            category="linear",
-                            buyLeverage=str(leverage),
-                            sellLeverage=str(leverage)
-                        )
-                    except Exception as e:
-                        print(f"Failed to adjust leverage: {str(e)}")
+            if current_leverage != leverage and abs(size) > 0:
+                print(f"Adjusting leverage to {leverage}.")
+                try:
+                    await execute_with_timeout(
+                        self.bybit_client.set_leverage,
+                        timeout=5,
+                        symbol=symbol,
+                        category="linear",
+                        buyLeverage=str(leverage),
+                        sellLeverage=str(leverage)
+                    )
+                except Exception as e:
+                    print(f"Failed to adjust leverage: {str(e)}")
 
             # Calculate the size difference after potential closure
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0

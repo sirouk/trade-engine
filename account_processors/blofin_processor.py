@@ -29,6 +29,8 @@ class BloFin:
         }
         
         self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()} # unusued as they are not needed
+        
+        self.leverage_override = self.credentials.blofin.leverage_override
 
     async def fetch_balance(self, instrument="USDT"):
         try:
@@ -296,6 +298,11 @@ class BloFin:
         Reconcile the current position with the target size, leverage, and margin mode.
         """
         try:
+            # Use leverage override if set
+            if self.leverage_override > 0:
+                print(f"Using exchange-specific leverage override: {self.leverage_override}")
+                leverage = self.leverage_override
+                
             unified_positions = await self.fetch_and_map_positions(symbol)
             current_position = unified_positions[0] if unified_positions else None
             
@@ -349,7 +356,7 @@ class BloFin:
                     # no need to change margin mode here, as new position will be opened with the desired margin mode
 
             # if leverage is different, or we are opening a new position, and not closing a position
-            if current_leverage != leverage and abs(current_size) != abs(size):
+            if current_leverage != leverage and abs(size) > 0:
                 print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
                 try:
                     await execute_with_timeout(

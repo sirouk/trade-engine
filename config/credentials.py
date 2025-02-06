@@ -9,23 +9,27 @@ class BittensorCredentials:
 class BybitCredentials:
     api_key: str
     api_secret: str
+    leverage_override: int = 0
 
 @dataclass
 class BloFinCredentials:
     api_key: str
     api_secret: str
     api_passphrase: str
+    leverage_override: int = 0
 
 @dataclass
 class KuCoinCredentials:
     api_key: str
     api_secret: str
     api_passphrase: str
+    leverage_override: int = 0
     
 @dataclass
 class MEXCCredentials:
     api_key: str
     api_secret: str
+    leverage_override: int = 0
 
 @dataclass
 class Credentials:
@@ -47,14 +51,15 @@ def load_credentials(file_path: str) -> Credentials:
         # Return default Credentials objects when the file is not found
         return Credentials(
             bittensor_sn8=BittensorCredentials(api_key="", endpoint=""),
-            bybit=BybitCredentials(api_key="", api_secret=""),
-            blofin=BloFinCredentials(api_key="", api_secret="", api_passphrase=""),
-            kucoin=KuCoinCredentials(api_key="", api_secret="", api_passphrase=""),
-            mexc=MEXCCredentials(api_key="", api_secret=""),
+            bybit=BybitCredentials(api_key="", api_secret="", leverage_override=0),
+            blofin=BloFinCredentials(api_key="", api_secret="", api_passphrase="", leverage_override=0),
+            kucoin=KuCoinCredentials(api_key="", api_secret="", api_passphrase="", leverage_override=0),
+            mexc=MEXCCredentials(api_key="", api_secret="", leverage_override=0),
         )
 
     with open(file_path, 'r', encoding='utf-8') as f:
         data = ujson.load(f)
+        #print(f"Raw data loaded from {file_path}: {data}")  # Debug print
 
     bittensor_creds = data.get('bittensor_sn8', {})
     bybit_creds = data.get('bybit', {})
@@ -62,7 +67,11 @@ def load_credentials(file_path: str) -> Credentials:
     kucoin_creds = data.get('kucoin', {})
     mexc_creds = data.get('mexc', {})
 
-    return Credentials(
+    # Debug prints
+    #print(f"KuCoin creds from file: {kucoin_creds}")
+    #print(f"KuCoin leverage override from file: {kucoin_creds.get('leverage_override', 0)}")
+
+    credentials = Credentials(
         bittensor_sn8=BittensorCredentials(
             api_key=bittensor_creds.get('api_key', ""),
             endpoint=bittensor_creds.get('endpoint', ""),
@@ -70,22 +79,30 @@ def load_credentials(file_path: str) -> Credentials:
         bybit=BybitCredentials(
             api_key=bybit_creds.get('api_key', ""),
             api_secret=bybit_creds.get('api_secret', ""),
+            leverage_override=int(bybit_creds.get('leverage_override', 0)),  # Ensure int conversion
         ),
         blofin=BloFinCredentials(
             api_key=blofin_creds.get('api_key', ""),
             api_secret=blofin_creds.get('api_secret', ""),
             api_passphrase=blofin_creds.get('api_passphrase', ""),
+            leverage_override=int(blofin_creds.get('leverage_override', 0)),  # Ensure int conversion
         ),
         kucoin=KuCoinCredentials(
             api_key=kucoin_creds.get('api_key', ""),
             api_secret=kucoin_creds.get('api_secret', ""),
             api_passphrase=kucoin_creds.get('api_passphrase', ""),
+            leverage_override=int(kucoin_creds.get('leverage_override', 0)),  # Ensure int conversion
         ),
         mexc=MEXCCredentials(
             api_key=mexc_creds.get('api_key', ""),
             api_secret=mexc_creds.get('api_secret', ""),
+            leverage_override=int(mexc_creds.get('leverage_override', 0)),  # Ensure int conversion
         ),
     )
+
+    # Debug print
+    #print(f"Loaded credentials for KuCoin: {credentials.kucoin}")
+    return credentials
 
 def save_credentials(credentials: Credentials, file_path: str):
     """Save credentials to a JSON file."""
@@ -108,6 +125,21 @@ def prompt_for_changes(credentials_name: str, skip_prompt: bool = False) -> bool
         print("Please enter 'yes' or 'no'.")
     return False
 
+def prompt_for_leverage_override(exchange_name, current_leverage=0):
+    """Prompt the user to assign a leverage override for an exchange.
+    A value > 0 will override the leverage passed in the reconcile function."""
+    default_msg = f" (press Enter for current value: {current_leverage})" if current_leverage else " (press Enter to skip)"
+    while True:
+        try:
+            override = input(f"Enter leverage override for {exchange_name}{default_msg}: ").strip()
+            if not override:
+                return current_leverage
+            value = int(override)
+            if value >= 0:
+                return value
+            print("Please enter a non-negative integer.")
+        except ValueError:
+            print("Please enter an integer value.")
 
 def ensure_bittensor_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
     """Prompt for Bittensor credentials if they don't exist, or ask to change them."""
@@ -127,9 +159,13 @@ def ensure_bittensor_credentials(credentials: Credentials, skip_prompt: bool = F
     return credentials
 
 def ensure_bybit_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
-    """Prompt for Bybit API credentials if they don't exist, or ask to change them."""
-    # Ask if the user wants to change existing credentials
-    if credentials.bybit.api_key and credentials.bybit.api_secret and not prompt_for_changes("Bybit",skip_prompt):
+    """Prompt for Bybit API credentials if they don't exist, or ask to change them, including a leverage override."""
+    # Check if credentials exist and if we want to change them
+    has_credentials = credentials.bybit.api_key and credentials.bybit.api_secret
+    if has_credentials and not prompt_for_changes("Bybit", skip_prompt):
+        # Still ask about leverage override even if other credentials aren't changing
+        if prompt_for_changes("Bybit leverage override", skip_prompt):
+            credentials.bybit.leverage_override = prompt_for_leverage_override("Bybit", credentials.bybit.leverage_override)
         return credentials
 
     if not credentials.bybit.api_key or prompt_for_changes("Bybit API key", skip_prompt):
@@ -140,12 +176,21 @@ def ensure_bybit_credentials(credentials: Credentials, skip_prompt: bool = False
         api_secret = input("Enter your Bybit API secret: ")
         credentials.bybit.api_secret = api_secret
 
+    # Always prompt for leverage override when setting up new credentials
+    credentials.bybit.leverage_override = prompt_for_leverage_override("Bybit", credentials.bybit.leverage_override)
     save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 
 def ensure_blofin_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
-    """Prompt for BloFin API credentials if they don't exist, or ask to change them."""
-    if credentials.blofin.api_key and credentials.blofin.api_secret and credentials.blofin.api_passphrase and not prompt_for_changes("BloFin", skip_prompt):
+    """Prompt for BloFin API credentials if they don't exist, or ask to change them, including a leverage override."""
+    # Check if credentials exist and if we want to change them
+    has_credentials = (credentials.blofin.api_key and 
+                      credentials.blofin.api_secret and 
+                      credentials.blofin.api_passphrase)
+    if has_credentials and not prompt_for_changes("BloFin", skip_prompt):
+        # Still ask about leverage override even if other credentials aren't changing
+        if prompt_for_changes("BloFin leverage override", skip_prompt):
+            credentials.blofin.leverage_override = prompt_for_leverage_override("BloFin", credentials.blofin.leverage_override)
         return credentials
 
     if not credentials.blofin.api_key or prompt_for_changes("BloFin API key", skip_prompt):
@@ -160,12 +205,21 @@ def ensure_blofin_credentials(credentials: Credentials, skip_prompt: bool = Fals
         passphrase = input("Enter your BloFin API passphrase: ")
         credentials.blofin.api_passphrase = passphrase
 
+    # Always prompt for leverage override when setting up new credentials
+    credentials.blofin.leverage_override = prompt_for_leverage_override("BloFin", credentials.blofin.leverage_override)
     save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 
 def ensure_kucoin_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
-    """Prompt for KuCoin API credentials if they don't exist, or ask to change them."""
-    if credentials.kucoin.api_key and credentials.kucoin.api_secret and credentials.kucoin.api_passphrase and not prompt_for_changes("KuCoin", skip_prompt):
+    """Prompt for KuCoin API credentials if they don't exist, or ask to change them, including a leverage override."""
+    # Check if credentials exist and if we want to change them
+    has_credentials = (credentials.kucoin.api_key and 
+                      credentials.kucoin.api_secret and 
+                      credentials.kucoin.api_passphrase)
+    if has_credentials and not prompt_for_changes("KuCoin", skip_prompt):
+        # Still ask about leverage override even if other credentials aren't changing
+        if prompt_for_changes("KuCoin leverage override", skip_prompt):
+            credentials.kucoin.leverage_override = prompt_for_leverage_override("KuCoin", credentials.kucoin.leverage_override)
         return credentials
 
     if not credentials.kucoin.api_key or prompt_for_changes("KuCoin API key", skip_prompt):
@@ -180,12 +234,19 @@ def ensure_kucoin_credentials(credentials: Credentials, skip_prompt: bool = Fals
         passphrase = input("Enter your KuCoin API passphrase: ")
         credentials.kucoin.api_passphrase = passphrase
 
+    # Always prompt for leverage override when setting up new credentials
+    credentials.kucoin.leverage_override = prompt_for_leverage_override("KuCoin", credentials.kucoin.leverage_override)
     save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 
 def ensure_mexc_credentials(credentials: Credentials, skip_prompt: bool = False) -> Credentials:
-    """Prompt for MEXC API credentials if they don't exist, or ask to change them."""
-    if credentials.mexc.api_key and credentials.mexc.api_secret and not prompt_for_changes("MEXC", skip_prompt):
+    """Prompt for MEXC API credentials if they don't exist, or ask to change them, including a leverage override."""
+    # Check if credentials exist and if we want to change them
+    has_credentials = credentials.mexc.api_key and credentials.mexc.api_secret
+    if has_credentials and not prompt_for_changes("MEXC", skip_prompt):
+        # Still ask about leverage override even if other credentials aren't changing
+        if prompt_for_changes("MEXC leverage override", skip_prompt):
+            credentials.mexc.leverage_override = prompt_for_leverage_override("MEXC", credentials.mexc.leverage_override)
         return credentials
 
     if not credentials.mexc.api_key or prompt_for_changes("MEXC API key", skip_prompt):
@@ -196,6 +257,8 @@ def ensure_mexc_credentials(credentials: Credentials, skip_prompt: bool = False)
         api_secret = input("Enter your MEXC API secret: ")
         credentials.mexc.api_secret = api_secret
 
+    # Always prompt for leverage override when setting up new credentials
+    credentials.mexc.leverage_override = prompt_for_leverage_override("MEXC", credentials.mexc.leverage_override)
     save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 

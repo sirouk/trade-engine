@@ -12,6 +12,7 @@ class KuCoin:
     def __init__(self):
         self.exchange_name = "KuCoin"
         self.enabled = True
+        self.leverage_tolerance = 0.10
         
         # Load KuCoin Futures API credentials from the credentials file
         self.credentials = load_kucoin_credentials()
@@ -37,6 +38,9 @@ class KuCoin:
         }
 
         self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()}
+
+        self.leverage_override = self.credentials.kucoin.leverage_override
+        
 
     async def fetch_balance(self, instrument="USDT"):
         """Fetch futures account balance."""
@@ -309,6 +313,15 @@ class KuCoin:
         Reconcile the current position with the target size, leverage, and margin mode.
         """
         try:
+            print(f"\nReconciling KuCoin position with initial leverage: {leverage}")
+            print(f"Current leverage override setting: {self.leverage_override}")
+            
+            # Use leverage override if set
+            if self.leverage_override > 0:
+                print(f"Using exchange-specific leverage override: {self.leverage_override}")
+                leverage = self.leverage_override
+            
+            
             unified_positions = await self.fetch_and_map_positions(symbol)
             current_position = unified_positions[0] if unified_positions else None
             
@@ -349,13 +362,13 @@ class KuCoin:
                     # except Exception as e:
                     #     print(f"Margin Mode unchanged: {str(e)}")
 
-                # if the leverage is not within a 10% tolerance, close the position
-                if current_leverage > 0 and abs(current_leverage - leverage) > 0.10 * leverage and current_size != 0:
-                    print(f"\nLeverage change needed: {current_leverage} → {leverage}")
-                    print("KuCoin does not allow adjustment for leverage on an open position.")
-                    print("Closing position to modify leverage")
-                    await self.close_position(symbol)  # Close the current position
-                    current_size = 0 # Update current size to 0 after closing the position
+            # if the leverage is not within a 10% tolerance, close the position
+            if current_leverage > 0 and abs(current_leverage - leverage) > self.leverage_tolerance * leverage and current_size != 0 and abs(size) > 0:
+                print(f"\nLeverage change needed: {current_leverage} → {leverage}")
+                print("KuCoin does not allow adjustment for leverage on an open position.")
+                print("Closing position to modify leverage")
+                await self.close_position(symbol)  # Close the current position
+                current_size = 0 # Update current size to 0 after closing the position
 
             # Calculate size difference with proper precision
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
