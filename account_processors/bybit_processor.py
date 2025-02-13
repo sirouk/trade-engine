@@ -36,6 +36,9 @@ class ByBit:
         
         self.leverage_override = self.credentials.bybit.leverage_override
 
+        # Add logger prefix
+        self.log_prefix = f"[{self.exchange_name}]"
+
     async def fetch_balance(self, instrument="USDT"):
         try:
             balance = await execute_with_timeout(
@@ -60,11 +63,11 @@ class ByBit:
             # Available Balance = Wallet Balance - Initial Margin
             available_balance = wallet_balance - position_im
             
-            print(f"Available Balance for {instrument}: {available_balance}")
+            print(f"{self.log_prefix} Available Balance for {instrument}: {available_balance}")
             return available_balance
             
         except Exception as e:
-            print(f"Error fetching balance: {str(e)}")
+            print(f"{self.log_prefix} Error fetching balance: {str(e)}")
             
     # fetch all open positions
     async def fetch_all_open_positions(self):
@@ -78,7 +81,7 @@ class ByBit:
             #print(f"All Open Positions: {positions}")
             return positions
         except Exception as e:
-            print(f"Error fetching all open positions: {str(e)}")
+            print(f"{self.log_prefix} Error fetching all open positions: {str(e)}")
 
     async def fetch_open_positions(self, symbol):
         try:
@@ -88,10 +91,10 @@ class ByBit:
                 category="linear",
                 symbol=symbol
             )
-            print(f"Open Positions: {positions}")
+            print(f"{self.log_prefix} Open Positions: {positions}")
             return positions
         except Exception as e:
-            print(f"Error fetching open positions: {str(e)}")
+            print(f"{self.log_prefix} Error fetching open positions: {str(e)}")
 
     async def fetch_open_orders(self, symbol):
         try:
@@ -102,10 +105,10 @@ class ByBit:
                 settleCoin=self.SETTLE_COIN,
                 symbol=symbol
             )
-            print(f"Open Orders: {orders}")
+            print(f"{self.log_prefix} Open Orders: {orders}")
             return orders
         except Exception as e:
-            print(f"Error fetching open orders: {str(e)}")
+            print(f"{self.log_prefix} Error fetching open orders: {str(e)}")
             
     async def get_account_margin_mode(self) -> str:
         """Fetch the account info to determine the margin mode for UTA2.0."""
@@ -137,7 +140,7 @@ class ByBit:
             # Determine margin mode if tradeMode is ambiguous
             margin_mode = None
             if fetch_margin_mode and positions and positions[0].get("tradeMode") == 0 and float(positions[0].get("size")) != 0:
-                print("Unified Account where trade mode is ambiguous, or we are really cross margin. Fetching account margin mode to be sure.")
+                print(f"{self.log_prefix} Unified Account where trade mode is ambiguous, or we are really cross margin. Fetching account margin mode to be sure.")
                 margin_mode = await self.get_account_margin_mode()
 
             unified_positions = [
@@ -147,11 +150,11 @@ class ByBit:
             ]
 
             for unified_position in unified_positions:
-                print(f"Unified Position: {unified_position}")
+                print(f"{self.log_prefix} Unified Position: {unified_position}")
 
             return unified_positions
         except Exception as e:
-            print(f"Error mapping Bybit positions: {str(e)}")
+            print(f"{self.log_prefix} Error mapping Bybit positions: {str(e)}")
             return []
     
     def map_bybit_position_to_unified(self, position: dict, margin_mode: str = None) -> UnifiedPosition:
@@ -189,7 +192,7 @@ class ByBit:
             )
             ticker_data = tickers["result"]["list"][0]  # Assuming the first entry is the relevant ticker
             
-            print(f"Ticker: {ticker_data}")
+            print(f"{self.log_prefix} Ticker: {ticker_data}")
             return UnifiedTicker(
                 symbol=symbol,
                 bid=float(ticker_data.get("bid1Price", 0)),
@@ -199,7 +202,7 @@ class ByBit:
                 exchange=self.exchange_name
             )
         except Exception as e:
-            print(f"Error fetching tickers from Bybit: {str(e)}")
+            print(f"{self.log_prefix} Error fetching tickers from Bybit: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
         """Fetch instrument details including tick size, lot size, min size, and contract value."""
@@ -249,7 +252,7 @@ class ByBit:
             
             # Fetch and scale the size and price
             lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
-            print(f"Ordering {lots} lots @ {price}")
+            print(f"{self.log_prefix} Ordering {lots} lots @ {price}")
             #quit()
             
             # set leverage and margin mode    
@@ -260,7 +263,7 @@ class ByBit:
                     setMarginMode=bybit_margin_mode,
                 )   
             except Exception as e:
-                print(f"Margin Mode unchanged: {str(e)}")
+                print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
             
             try:     
                 await execute_with_timeout(
@@ -272,7 +275,7 @@ class ByBit:
                     sellLeverage=str(leverage),
                 )
             except Exception as e:
-                print(f"Leverage unchanged: {str(e)}")
+                print(f"{self.log_prefix} Leverage unchanged: {str(e)}")
             
             order = await execute_with_timeout(
                 self.bybit_client.place_order,
@@ -290,14 +293,14 @@ class ByBit:
                 orderLinkId=client_oid,
                 positionIdx=0, # one-way mode
             )
-            print(f"Limit Order Placed: {order}")
+            print(f"{self.log_prefix} Limit Order Placed: {order}")
             # Limit Order Placed: {'retCode': 0, 'retMsg': 'OK', 'result': {'orderId': '2c9eee09-b90e-47eb-ace0-d82c6cdc7bfa', 'orderLinkId': '20241014022046505544'}, 'retExtInfo': {}, 'time': 1728872447805}
             # Controlling 0.001 of BTC $62,957.00 is expected to be 62.957 USDT
             # Actual Margin Used: 12.6185 USDT @ 5x 
             return order
             
         except Exception as e:
-            print(f"Error placing limit order: {str(e)}")
+            print(f"{self.log_prefix} Error placing limit order: {str(e)}")
 
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True, adjust_leverage: bool = True, adjust_margin_mode: bool = True):
         """Open a position with a market order."""
@@ -308,7 +311,7 @@ class ByBit:
             
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
-            print(f"Processing {lots} lots of {symbol} with a {side} order.")
+            print(f"{self.log_prefix} Processing {lots} lots of {symbol} with a {side} order.")
 
             if adjust_margin_mode:
                 bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
@@ -319,7 +322,7 @@ class ByBit:
                         setMarginMode=bybit_margin_mode,
                     )
                 except Exception as e:
-                    print(f"Margin Mode unchanged: {str(e)}")
+                    print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
             
             if adjust_leverage:
                 try:
@@ -332,7 +335,7 @@ class ByBit:
                         sellLeverage=str(leverage),
                     )
                 except Exception as e:
-                    print(f"Leverage unchanged: {str(e)}")
+                    print(f"{self.log_prefix} Leverage unchanged: {str(e)}")
 
             order = await execute_with_timeout(
                 self.bybit_client.place_order,
@@ -346,10 +349,10 @@ class ByBit:
                 orderLinkId=client_oid,
                 positionIdx=0
             )
-            print(f"Market Order Placed: {order}")
+            print(f"{self.log_prefix} Market Order Placed: {order}")
             return order
         except Exception as e:
-            print(f"Error placing market order: {str(e)}")
+            print(f"{self.log_prefix} Error placing market order: {str(e)}")
 
     async def close_position(self, symbol: str):
         """Close the position for a specific symbol."""
@@ -357,7 +360,7 @@ class ByBit:
             # Fetch open positions to determine the side to close
             positions = await self.fetch_open_positions(symbol)
             if not positions["result"]["list"]:
-                print(f"No open position found for {symbol}.")
+                print(f"{self.log_prefix} No open position found for {symbol}.")
                 return None
 
             position = positions["result"]["list"][0]
@@ -366,7 +369,7 @@ class ByBit:
             leverage = float(position["leverage"])
             margin_mode = "isolated" if position["tradeMode"] == 1 else "cross"
 
-            print(f"Closing {size} lots of {symbol} with market order.")
+            print(f"{self.log_prefix} Closing {size} lots of {symbol} with market order.")
 
             # Place a market order in the opposite direction to close the position
             order = await self.open_market_position(
@@ -379,11 +382,11 @@ class ByBit:
                 adjust_leverage=False,
                 adjust_margin_mode=False,
             )
-            print(f"Position Closed: {order}")
+            print(f"{self.log_prefix} Position Closed: {order}")
             return order
 
         except Exception as e:
-            print(f"Error closing position: {str(e)}")
+            print(f"{self.log_prefix} Error closing position: {str(e)}")
 
     async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
         """
@@ -393,7 +396,7 @@ class ByBit:
         try:
             # Use leverage override if set
             if self.leverage_override > 0:
-                print(f"Using exchange-specific leverage override: {self.leverage_override}")
+                print(f"{self.log_prefix} Using exchange-specific leverage override: {self.leverage_override}")
                 leverage = self.leverage_override
                 
             # Fetch current positions for the given symbol
@@ -415,14 +418,14 @@ class ByBit:
             
             # Determine if the position is flipping (long to short or vice versa)
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
-                print(f"Flipping position from {current_size} to {size}. Closing current position first.")
+                print(f"{self.log_prefix} Flipping position from {current_size} to {size}. Closing current position first.")
                 await self.close_position(symbol)  # Close the current position
                 current_size = 0  # Reset current size to 0 after closure
                 
             # Adjust margin mode and leverage if necessary, and the position exists
             if current_size != 0 and size != 0:
                 if current_margin_mode != margin_mode:
-                    print(f"Adjusting margin mode to {margin_mode}.")
+                    print(f"{self.log_prefix} Adjusting margin mode to {margin_mode}.")
                     bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                     try:
                         await execute_with_timeout(
@@ -431,10 +434,10 @@ class ByBit:
                             setMarginMode=bybit_margin_mode,
                         )
                     except Exception as e:
-                        print(f"Failed to adjust margin mode: {str(e)}")
+                        print(f"{self.log_prefix} Failed to adjust margin mode: {str(e)}")
 
             if current_leverage != leverage and abs(size) > 0:
-                print(f"Adjusting leverage to {leverage}.")
+                print(f"{self.log_prefix} Adjusting leverage to {leverage}.")
                 try:
                     await execute_with_timeout(
                         self.bybit_client.set_leverage,
@@ -445,24 +448,24 @@ class ByBit:
                         sellLeverage=str(leverage)
                     )
                 except Exception as e:
-                    print(f"Failed to adjust leverage: {str(e)}")
+                    print(f"{self.log_prefix} Failed to adjust leverage: {str(e)}")
 
             # Calculate the size difference after potential closure
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
             size_diff = float(f"%.{decimal_places}f" % (size - current_size))
             
-            print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
+            print(f"{self.log_prefix} Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 
             # If the target size is already reached, no action is needed
             if size_diff == 0:
-                print(f"Position for {symbol} is already at the target size.")
+                print(f"{self.log_prefix} Position for {symbol} is already at the target size.")
                 return
 
             # Determine the side (buy/sell) for the adjustment order
             side = "Buy" if size_diff > 0 else "Sell"
             size_diff = abs(size_diff)  # Use absolute value for the order size
 
-            print(f"Placing a {side} order to adjust position by {size_diff}.")
+            print(f"{self.log_prefix} Placing a {side} order to adjust position by {size_diff}.")
             await self.open_market_position(
                 symbol=symbol,
                 side=side.capitalize(),
@@ -474,7 +477,7 @@ class ByBit:
                 adjust_margin_mode=size != 0,
             )
         except Exception as e:
-            print(f"Error reconciling position: {str(e)}")
+            print(f"{self.log_prefix} Error reconciling position: {str(e)}")
 
     async def test_symbol_formats(self):
         """Test function to dump symbol information for mapping."""
@@ -492,8 +495,8 @@ class ByBit:
                         symbol=symbol,
                     )
                     
-                    print(f"\nBybit Symbol Information for {symbol}:")
-                    print(f"Native Symbol Format: {symbol}")
+                    print(f"{self.log_prefix} Bybit Symbol Information for {symbol}:")
+                    print(f"{self.log_prefix} Native Symbol Format: {symbol}")
                     #print(f"Full Response: {instrument}")
                     
                     # Try to fetch a ticker to verify symbol works
@@ -501,17 +504,17 @@ class ByBit:
                     #print(f"Ticker Test: {ticker}")
                     
                 except Exception as e:
-                    print(f"Error testing {symbol}: {str(e)}")
+                    print(f"{self.log_prefix} Error testing {symbol}: {str(e)}")
                     
             # Add to test_symbol_formats() in each processor
             test_symbols = ["BTCUSDT", "ETHUSDT"]
-            print("\nTesting symbol mapping:")
+            print(f"{self.log_prefix} Testing symbol mapping:")
             for symbol in test_symbols:
                 mapped = self.map_signal_symbol_to_exchange(symbol)
-                print(f"Signal symbol: {symbol} -> Exchange symbol: {mapped}")
+                print(f"{self.log_prefix} Signal symbol: {symbol} -> Exchange symbol: {mapped}")
                     
         except Exception as e:
-            print(f"Error in symbol format test: {str(e)}")
+            print(f"{self.log_prefix} Error in symbol format test: {str(e)}")
 
     def map_signal_symbol_to_exchange(self, signal_symbol: str) -> str:
         """Convert signal symbol format (e.g. BTCUSDT) to exchange format."""
@@ -524,7 +527,7 @@ class ByBit:
             # Get available balance
             balance = await self.fetch_balance("USDT")
             available_balance = float(balance) if balance else 0.0
-            print(f"Available Balance: {available_balance} USDT")
+            print(f"{self.log_prefix} Available Balance: {available_balance} USDT")
             
             # Get positions directly - Bybit provides positionIM (initial margin)
             positions = await self.fetch_all_open_positions()
@@ -535,14 +538,14 @@ class ByBit:
                     # quit()
                     #position_margin += float(pos["positionIM"])  # Direct initial margin value
                     position_margin += float(pos["positionBalance"])  # Direct initial margin value
-            print(f"Position Initial Margin: {position_margin} USDT")
+            print(f"{self.log_prefix} Position Initial Margin: {position_margin} USDT")
             
             total_value = available_balance + position_margin
-            print(f"ByBit Initial Account Value: {total_value} USDT")
+            print(f"{self.log_prefix} ByBit Initial Account Value: {total_value} USDT")
             return total_value
             
         except Exception as e:
-            print(f"Error calculating initial account value: {str(e)}")
+            print(f"{self.log_prefix} Error calculating initial account value: {str(e)}")
             return 0.0
 
 
@@ -596,9 +599,9 @@ async def main():
     # await bybit.test_symbol_formats()
     
     # Test initial account value calculation
-    print("\nTesting initial account value calculation:")
+    print(f"{bybit.log_prefix} Testing initial account value calculation:")
     initial_value = await bybit.fetch_initial_account_value()
-    print(f"Final Initial Account Value: {initial_value} USDT")
+    print(f"{bybit.log_prefix} Final Initial Account Value: {initial_value} USDT")
     
     # End time
     end_time = datetime.datetime.now()

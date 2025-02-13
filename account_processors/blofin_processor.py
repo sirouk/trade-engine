@@ -32,6 +32,9 @@ class BloFin:
         
         self.leverage_override = self.credentials.blofin.leverage_override
 
+        # Add logger prefix
+        self.log_prefix = f"[{self.exchange_name}]"
+
     async def fetch_balance(self, instrument="USDT"):
         try:
             balance = await execute_with_timeout(
@@ -45,10 +48,10 @@ class BloFin:
             
             # get coin balance available to trade
             balance = balance["data"][0]["available"]
-            print(f"Account Balance for {instrument}: {balance}")
+            print(f"{self.log_prefix} Account Balance for {instrument}: {balance}")
             return balance
         except Exception as e:
-            print(f"Error fetching balance: {str(e)}")
+            print(f"{self.log_prefix} Error fetching balance: {str(e)}")
             
     # fetch all open positions
     async def fetch_all_open_positions(self):
@@ -59,7 +62,7 @@ class BloFin:
             )
             return positions
         except Exception as e:
-            print(f"Error fetching all open positions: {str(e)}")
+            print(f"{self.log_prefix} Error fetching all open positions: {str(e)}")
     
     async def fetch_open_positions(self, symbol):
         try:
@@ -68,10 +71,10 @@ class BloFin:
                 timeout=5,
                 inst_id=symbol
             )
-            print(f"Open Positions: {positions}")
+            print(f"{self.log_prefix} Open Positions: {positions}")
             return positions
         except Exception as e:
-            print(f"Error fetching open positions: {str(e)}")
+            print(f"{self.log_prefix} Error fetching open positions: {str(e)}")
 
     async def fetch_open_orders(self, symbol):
         try:
@@ -80,10 +83,10 @@ class BloFin:
                 timeout=5,
                 inst_id=symbol
             )
-            print(f"Open Orders: {orders}")
+            print(f"{self.log_prefix} Open Orders: {orders}")
             return orders
         except Exception as e:
-            print(f"Error fetching open orders: {str(e)}")
+            print(f"{self.log_prefix} Error fetching open orders: {str(e)}")
 
     async def fetch_and_map_positions(self, symbol: str):
         """Fetch open positions from BloFin and convert them to UnifiedPosition objects."""
@@ -105,11 +108,11 @@ class BloFin:
             ]
 
             for unified_position in unified_positions:
-                print(f"Unified Position: {unified_position}")
+                print(f"{self.log_prefix} Unified Position: {unified_position}")
 
             return unified_positions
         except Exception as e:
-            print(f"Error mapping BloFin positions: {str(e)}")
+            print(f"{self.log_prefix} Error mapping BloFin positions: {str(e)}")
             return []
 
     def map_blofin_position_to_unified(self, position: dict) -> UnifiedPosition:
@@ -145,7 +148,7 @@ class BloFin:
             )
             ticker_data = tickers["data"][0]  # Assuming the first entry is the relevant ticker
 
-            print(f"Ticker: {ticker_data}")
+            print(f"{self.log_prefix} Ticker: {ticker_data}")
             return UnifiedTicker(
                 symbol=symbol,
                 bid=float(ticker_data.get("bidPrice", 0)),
@@ -155,7 +158,7 @@ class BloFin:
                 exchange=self.exchange_name
             )
         except Exception as e:
-            print(f"Error fetching tickers from Blofin: {str(e)}")
+            print(f"{self.log_prefix} Error fetching tickers from Blofin: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
         """Fetch instrument details including tick size and lot size."""
@@ -173,10 +176,11 @@ class BloFin:
                     tick_size = float(instrument["tickSize"])
                     contract_value = float(instrument["contractValue"])
                     
+                    print(f"{self.log_prefix} Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_size}, Tick Size: {tick_size}, Contract Value: {contract_value}")
                     return lot_size, min_size, tick_size, contract_value
             raise ValueError(f"Symbol {symbol} not found.")
         except Exception as e:
-            print(f"Error fetching symbol details: {str(e)}")
+            print(f"{self.log_prefix} Error fetching symbol details: {str(e)}")
             return None
 
     async def _place_limit_order_test(self, ):
@@ -217,10 +221,10 @@ class BloFin:
                 margin_mode=margin_mode,
                 clientOrderId=client_order_id,
             )
-            print(f"Limit Order Placed: {order}")
+            print(f"{self.log_prefix} Limit Order Placed: {order}")
             # Limit Order Placed: {'code': '0', 'msg': '', 'data': [{'orderId': '1000012973229', 'clientOrderId': '20241014022135830998', 'msg': 'success', 'code': '0'}]}
         except Exception as e:
-            print(f"Error placing limit order: {str(e)}")
+            print(f"{self.log_prefix} Error placing limit order: {str(e)}")
 
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
         """Open a position with a market order on BloFin."""
@@ -232,7 +236,7 @@ class BloFin:
 
             # Fetch and scale the size
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
-            print(f"Processing {lots} lots of {symbol} with market order")
+            print(f"{self.log_prefix} Processing {lots} lots of {symbol} with market order")
 
             # Place the market order
             order = await execute_with_timeout(
@@ -248,11 +252,11 @@ class BloFin:
                 margin_mode=margin_mode,
                 clientOrderId=client_order_id
             )
-            print(f"Market Order Placed: {order}")
+            print(f"{self.log_prefix} Market Order Placed: {order}")
             return order
 
         except Exception as e:
-            print(f"Error placing market order: {str(e)}")
+            print(f"{self.log_prefix} Error placing market order: {str(e)}")
 
     async def close_position(self, symbol: str):
         """Close the position for a specific symbol on BloFin."""
@@ -262,7 +266,7 @@ class BloFin:
             positions = response.get("data", [])
 
             if not positions:
-                print(f"No open position found for {symbol}.")
+                print(f"{self.log_prefix} No open position found for {symbol}.")
                 return None
 
             # Extract the position details
@@ -272,7 +276,7 @@ class BloFin:
             # Determine the side based on the position size
             side = "Sell" if size > 0 else "Buy"  # Long -> Sell, Short -> Buy
             size = abs(size)  # Negate size by using its absolute value
-            print(f"Closing {size} lots of {symbol} with a market order.")
+            print(f"{self.log_prefix} Closing {size} lots of {symbol} with a market order.")
 
             # Place a market order in the opposite direction to close the position
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -287,11 +291,11 @@ class BloFin:
                 size=size
             )
 
-            print(f"Position Closed: {order}")
+            print(f"{self.log_prefix} Position Closed: {order}")
             return order
             
         except Exception as e:
-            print(f"Error closing position: {str(e)}")
+            print(f"{self.log_prefix} Error closing position: {str(e)}")
             
     async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
         """
@@ -300,7 +304,7 @@ class BloFin:
         try:
             # Use leverage override if set
             if self.leverage_override > 0:
-                print(f"Using exchange-specific leverage override: {self.leverage_override}")
+                print(f"{self.log_prefix} Using exchange-specific leverage override: {self.leverage_override}")
                 leverage = self.leverage_override
                 
             unified_positions = await self.fetch_and_map_positions(symbol)
@@ -320,13 +324,13 @@ class BloFin:
 
             # Handle position flips (long to short or vice versa)
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
-                print(f"Flipping position from {current_size} to {size}. Closing current position.")
+                print(f"{self.log_prefix} Flipping position from {current_size} to {size}. Closing current position.")
                 await self.close_position(symbol)
                 current_size = 0
             # Handle position size reduction
             elif current_size != 0 and abs(size) < abs(current_size):
                 reduction_size = abs(current_size) - abs(size)
-                print(f"Reducing position size from {current_size} to {size} (reduction: {reduction_size})")
+                print(f"{self.log_prefix} Reducing position size from {current_size} to {size} (reduction: {reduction_size})")
                 
                 # Determine side for reduction (opposite of current position)
                 side = "Sell" if current_size > 0 else "Buy"
@@ -349,7 +353,7 @@ class BloFin:
                 
                 # Since Blofin does not support changing margin mode or leverage on existing positions, we need to close the position first
                 if current_margin_mode != margin_mode:
-                    print(f"Margin mode change detected. Closing current position to adjust margin mode from {current_margin_mode} to {margin_mode}.")
+                    print(f"{self.log_prefix} Margin mode change detected. Closing current position to adjust margin mode from {current_margin_mode} to {margin_mode}.")
                     await self.close_position(symbol)
                     current_size = 0  
                     
@@ -357,7 +361,7 @@ class BloFin:
 
             # if leverage is different, or we are opening a new position, and not closing a position
             if current_leverage != leverage and abs(size) > 0:
-                print(f"Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
+                print(f"{self.log_prefix} Adjusting leverage to {leverage} for {symbol} and position margin mode to {margin_mode}.")
                 try:
                     await execute_with_timeout(
                         self.blofin_client.trading.set_leverage_ct,
@@ -368,24 +372,24 @@ class BloFin:
                         position_side="net"
                     )
                 except Exception as e:
-                    print(f"Failed to adjust leverage: {str(e)}")
+                    print(f"{self.log_prefix} Failed to adjust leverage: {str(e)}")
 
             # Calculate the remaining size difference after any position closure
             # Format to required decimal places and convert back to float
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
             size_diff = float(f"%.{decimal_places}f" % (size - current_size))
             
-            print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
+            print(f"{self.log_prefix} Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 
             if size_diff == 0:
-                print(f"Position for {symbol} is already at the target size.")
+                print(f"{self.log_prefix} Position for {symbol} is already at the target size.")
                 return
 
             # Determine the side of the new order (buy/sell)
             side = "Buy" if size_diff > 0 else "Sell"
             size_diff = abs(size_diff)  # Work with absolute size for the order
 
-            print(f"Placing a {side} order to adjust position by {size_diff}.")
+            print(f"{self.log_prefix} Placing a {side} order to adjust position by {size_diff}.")
             await self.open_market_position(
                 symbol=symbol,
                 side=side.lower(),
@@ -395,7 +399,7 @@ class BloFin:
                 scale_lot_size=False  # Preserving the scale_lot_size parameter
             )
         except Exception as e:
-            print(f"Error reconciling position: {str(e)}")
+            print(f"{self.log_prefix} Error reconciling position: {str(e)}")
 
     async def test_symbol_formats(self):
         """Test function to dump symbol information for mapping."""
@@ -412,8 +416,8 @@ class BloFin:
                         inst_type="SWAP"
                     )
                     
-                    print(f"\nBloFin Symbol Information for {symbol}:")
-                    print(f"Native Symbol Format: {symbol}")
+                    print(f"\n{self.log_prefix} BloFin Symbol Information for {symbol}:")
+                    print(f"{self.log_prefix} Native Symbol Format: {symbol}")
                     #print(f"Full Response: {instrument}")
                     
                     # Try to fetch a ticker to verify symbol works
@@ -421,17 +425,17 @@ class BloFin:
                     #print(f"Ticker Test: {ticker}")
                     
                 except Exception as e:
-                    print(f"Error testing {symbol}: {str(e)}")
+                    print(f"{self.log_prefix} Error testing {symbol}: {str(e)}")
                     
             # Test symbol mapping
             test_signals = ["BTCUSDT", "ETHUSDT"]
-            print("\nTesting symbol mapping:")
+            print("\n{self.log_prefix} Testing symbol mapping:")
             for symbol in test_signals:
                 mapped = self.map_signal_symbol_to_exchange(symbol)
-                print(f"Signal symbol: {symbol} -> Exchange symbol: {mapped}")
+                print(f"{self.log_prefix} Signal symbol: {symbol} -> Exchange symbol: {mapped}")
                 
         except Exception as e:
-            print(f"Error in symbol format test: {str(e)}")
+            print(f"{self.log_prefix} Error in symbol format test: {str(e)}")
 
     def map_signal_symbol_to_exchange(self, signal_symbol: str) -> str:
         """Convert signal symbol format (e.g. BTCUSDT) to exchange format."""
@@ -448,7 +452,7 @@ class BloFin:
             # Get available balance
             balance = await self.fetch_balance("USDT")
             available_balance = float(balance) if balance else 0.0
-            print(f"Available Balance: {available_balance} USDT")
+            print(f"{self.log_prefix} Available Balance: {available_balance} USDT")
             
             # Get positions directly - BloFin provides margin directly
             positions = await self.fetch_all_open_positions()
@@ -456,14 +460,14 @@ class BloFin:
             if positions and "data" in positions:
                 for pos in positions["data"]:
                     position_margin += float(pos["margin"])  # Direct margin value
-            print(f"Position Initial Margin: {position_margin} USDT")
+            print(f"{self.log_prefix} Position Initial Margin: {position_margin} USDT")
             
             total_value = available_balance + position_margin
-            print(f"BloFin Initial Account Value: {total_value} USDT")
+            print(f"{self.log_prefix} BloFin Initial Account Value: {total_value} USDT")
             return total_value
             
         except Exception as e:
-            print(f"Error calculating initial account value: {str(e)}")
+            print(f"{self.log_prefix} Error calculating initial account value: {str(e)}")
             return 0.0
 
 
@@ -534,11 +538,11 @@ async def main():
     # Test total account value calculation
     print("\nTesting total account value calculation:")
     total_value = await blofin.fetch_initial_account_value()
-    print(f"Final Total Account Value: {total_value} USDT")
+    print(f"{self.log_prefix} Final Total Account Value: {total_value} USDT")
     
     # End time
     end_time = datetime.datetime.now()
-    print(f"Time taken: {end_time - start_time}")
+    print(f"{self.log_prefix} Time taken: {end_time - start_time}")
     
 if __name__ == "__main__":
     asyncio.run(main())

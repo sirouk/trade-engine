@@ -15,6 +15,9 @@ class MEXC:
         self.enabled = False
         self.leverage_tolerance = 0.10
         
+        # Add logger prefix
+        self.log_prefix = f"[{self.exchange_name}]"
+        
         # Load MEXC Futures API credentials from the credentials file
         self.credentials = load_mexc_credentials()
 
@@ -51,10 +54,10 @@ class MEXC:
             balance = balance.get("data", {})
             balance = balance.get("availableBalance", 0)
 
-            print(f"Account Balance for {instrument}: {balance}")
+            print(f"{self.log_prefix} Account Balance for {instrument}: {balance}")
             return balance
         except Exception as e:
-            print(f"Error fetching balance: {str(e)}")
+            print(f"{self.log_prefix} Error fetching balance: {str(e)}")
             
     # fetch all open positions
     async def fetch_all_open_positions(self):
@@ -67,7 +70,7 @@ class MEXC:
             #print(f"All Open Positions: {positions}")
             return positions
         except Exception as e:
-            print(f"Error fetching all open positions: {str(e)}")
+            print(f"{self.log_prefix} Error fetching all open positions: {str(e)}")
 
     async def fetch_open_positions(self, symbol):
         """Fetch open futures positions."""
@@ -77,10 +80,10 @@ class MEXC:
                 timeout=5,
                 symbol=symbol
             )
-            print(f"Open Positions: {positions}")
+            print(f"{self.log_prefix} Open Positions: {positions}")
             return positions.get("data", [])
         except Exception as e:
-            print(f"Error fetching open positions: {str(e)}")
+            print(f"{self.log_prefix} Error fetching open positions: {str(e)}")
 
     async def fetch_open_orders(self, symbol):
         """Fetch open futures orders."""
@@ -90,10 +93,10 @@ class MEXC:
                 timeout=5,
                 symbol=symbol
             )
-            print(f"Open Orders: {response}")
+            print(f"{self.log_prefix} Open Orders: {response}")
             return response.get("data", [])
         except Exception as e:
-            print(f"Error fetching open orders: {str(e)}")
+            print(f"{self.log_prefix} Error fetching open orders: {str(e)}")
 
     async def fetch_and_map_positions(self, symbol: str):
         """Fetch and map MEXC positions to UnifiedPosition."""
@@ -112,11 +115,11 @@ class MEXC:
             ]
 
             for unified_position in unified_positions:
-                print(f"Unified Position: {unified_position}")
+                print(f"{self.log_prefix} Unified Position: {unified_position}")
 
             return unified_positions
         except Exception as e:
-            print(f"Error mapping MEXC positions: {str(e)}")
+            print(f"{self.log_prefix} Error mapping MEXC positions: {str(e)}")
             return []
 
     def map_mexc_position_to_unified(self, position: dict) -> UnifiedPosition:
@@ -158,7 +161,7 @@ class MEXC:
             amount24 = float(ticker_data.get("amount24", 0))
             lastPrice = float(ticker_data.get("lastPrice", 0))
 
-            print(f"Ticker: {ticker_data}")
+            print(f"{self.log_prefix} Ticker: {ticker_data}")
             return UnifiedTicker(
                 symbol=symbol,
                 bid=float(ticker_data.get("bid1", 0)),
@@ -168,7 +171,7 @@ class MEXC:
                 exchange=self.exchange_name
             )
         except Exception as e:
-            print(f"Error fetching tickers from MEXC: {str(e)}")
+            print(f"{self.log_prefix} Error fetching tickers from MEXC: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
         """Fetch instrument details including lot size, min size, tick size, and contract value."""
@@ -201,7 +204,7 @@ class MEXC:
             raise ValueError(f"Missing expected key: {e}") from e
 
         except Exception as e:
-            print(f"Error fetching symbol details: {str(e)}")
+            print(f"{self.log_prefix} Error fetching symbol details: {str(e)}")
             return None
     
     async def _place_limit_order_test(self, ):
@@ -223,7 +226,7 @@ class MEXC:
 
             # Fetch and scale the size and price
             lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
-            print(f"Ordering {lots} lots @ {price}")
+            print(f"{self.log_prefix} Ordering {lots} lots @ {price}")
             #quit()
             
             order = await execute_with_timeout(
@@ -238,10 +241,10 @@ class MEXC:
                 leverage=leverage,
                 external_oid=client_oid
             )
-            print(f"Limit Order Placed: {order}")
+            print(f"{self.log_prefix} Limit Order Placed: {order}")
         except Exception as e:
-            print(f"Error placing limit order: {str(e)}")
-        
+            print(f"{self.log_prefix} Error placing limit order: {str(e)}")
+
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
         """Open a market position."""
         try:
@@ -252,7 +255,7 @@ class MEXC:
             
             # If the size is already in lot size, don't scale it
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
-            print(f"Processing {lots} lots of {symbol} with a {side} order")
+            print(f"{self.log_prefix} Processing {lots} lots of {symbol} with a {side} order")
             
             mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
             
@@ -268,37 +271,50 @@ class MEXC:
                 leverage=leverage,
                 external_oid=client_oid
             )
-            print(f"Market Order Placed: {order}")
+            print(f"{self.log_prefix} Market Order Placed: {order}")
             return order
 
         except Exception as e:
-            print(f"Error placing market order: {str(e)}")
+            print(f"{self.log_prefix} Error placing market order: {str(e)}")
 
     async def close_position(self, symbol: str):
         """Close the open position."""
         try:
             positions = await self.fetch_open_positions(symbol)
             if not positions:
-                print(f"No open position found for {symbol}.")
+                print(f"{self.log_prefix} No open position found for {symbol}.")
                 return None
 
             position = positions[0]
             size = abs(float(position["vol"]))
             side = 2 if position["posSide"] == 1 else 4  # Reverse side
 
-            print(f"Closing {size} lots of {symbol} with market order.")
+            print(f"{self.log_prefix} Closing {size} lots of {symbol} with market order.")
             return await self.open_market_position(symbol, side, size, leverage=int(position["leverage"]))
         except Exception as e:
-            print(f"Error closing position: {str(e)}")
+            print(f"{self.log_prefix} Error closing position: {str(e)}")
             
     async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
         """
         Reconcile the current position with the target size, leverage, and margin mode.
         """
         try:
+            # First check if account is enabled
+            if not self.enabled:
+                return
+            
+            # Get current positions
+            positions = await self.fetch_open_positions(symbol)
+            current_position = positions[0] if positions else None
+            
+            # Initialize current_leverage to None
+            current_leverage = None
+            if current_position:
+                current_leverage = float(current_position.get("leverage", 0))
+            
             # Use leverage override if set
             if self.leverage_override > 0:
-                print(f"Using exchange-specific leverage override: {self.leverage_override}")
+                print(f"{self.log_prefix} Using exchange-specific leverage override: {self.leverage_override}")
                 leverage = self.leverage_override
                 
             unified_positions = await self.fetch_and_map_positions(symbol)
@@ -314,11 +330,10 @@ class MEXC:
             # Initialize position state variables
             current_size = current_position.size if current_position else 0
             current_margin_mode = current_position.margin_mode if current_position else None
-            current_leverage = current_position.leverage if current_position else None
 
             # Determine if we need to close the current position before opening a new one
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
-                print(f"Flipping position from {current_size} to {size}. Closing current position.")
+                print(f"{self.log_prefix} Flipping position from {current_size} to {size}. Closing current position.")
                 await self.close_position(symbol)  # Close the current position
                 current_size = 0 # Update current size to 0 after closing the position
 
@@ -326,24 +341,24 @@ class MEXC:
             if current_size != 0 and size != 0:
                 if current_margin_mode != margin_mode:
 
-                    print(f"Closing position to modify margin mode to {margin_mode}.")
+                    print(f"{self.log_prefix} Closing position to modify margin mode to {margin_mode}.")
                     await self.close_position(symbol)  # Close the current position
                     current_size = 0 # Update current size to 0 after closing the position
 
-                    print(f"Adjusting account margin mode to {margin_mode}.")
+                    print(f"{self.log_prefix} Adjusting account margin mode to {margin_mode}.")
                     mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
                     try:
                         await execute_with_timeout(
-                            self.trade_client.modify_margin_mode,
+                            self.futures_client.modify_margin_mode,
                             timeout=5,
                             symbol=symbol,
                             marginMode=mexc_margin_mode,
                         )
                     except Exception as e:
-                        print(f"Margin Mode unchanged: {str(e)}")
+                        print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
 
             # if the leverage is not within a 10% tolerance, close the position
-            if current_leverage > 0 and abs(current_leverage - leverage) > self.leverage_tolerance * leverage and current_size != 0 and abs(size) > 0:
+            if current_leverage is not None and current_leverage > 0 and abs(current_leverage - leverage) > self.leverage_tolerance * leverage and current_size != 0 and abs(size) > 0:
                 print("KuCoin does not allow adjustment for leverage on an open position.")
                 print(f"Closing position to modify leverage from {current_leverage} to {leverage}.")
                 await self.close_position(symbol)  # Close the current position
@@ -353,17 +368,17 @@ class MEXC:
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
             size_diff = float(f"%.{decimal_places}f" % (size - current_size))
             
-            print(f"Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
+            print(f"{self.log_prefix} Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
 
             if size_diff == 0:
-                print(f"Position for {symbol} is already at the target size.")
+                print(f"{self.log_prefix} Position for {symbol} is already at the target size.")
                 return
 
             # Determine the side of the new order (buy/sell)
             side = 1 if size_diff > 0 else 3
             size_diff = abs(size_diff)  # Work with absolute size for the order
 
-            print(f"Placing a {side} order with {leverage}x leverage to adjust position by {size_diff}.")
+            print(f"{self.log_prefix} Placing a {side} order with {leverage}x leverage to adjust position by {size_diff}.")
             await self.open_market_position(
                 symbol=symbol,
                 side=side,
@@ -373,7 +388,7 @@ class MEXC:
                 scale_lot_size=False
             )
         except Exception as e:
-            print(f"Error reconciling position: {str(e)}")
+            print(f"{self.log_prefix} Error reconciling position: {str(e)}")
 
     async def test_symbol_formats(self):
         """Test function to dump symbol information for mapping."""
@@ -390,8 +405,8 @@ class MEXC:
                         symbol=symbol
                     )
                     
-                    print(f"\nMEXC Symbol Information for {symbol}:")
-                    print(f"Native Symbol Format: {symbol}")
+                    print(f"\n{self.log_prefix} MEXC Symbol Information for {symbol}:")
+                    print(f"{self.log_prefix} Native Symbol Format: {symbol}")
                     #print(f"Full Response: {contract}")
                     
                     # Try to fetch a ticker to verify symbol works
@@ -399,17 +414,17 @@ class MEXC:
                     #print(f"Ticker Test: {ticker}")
                     
                 except Exception as e:
-                    print(f"Error testing {symbol}: {str(e)}")
+                    print(f"{self.log_prefix} Error testing {symbol}: {str(e)}")
                     
             # Test symbol mapping
             test_signals = ["BTCUSDT", "ETHUSDT"]
-            print("\nTesting symbol mapping:")
+            print(f"{self.log_prefix} Testing symbol mapping:")
             for symbol in test_signals:
                 mapped = self.map_signal_symbol_to_exchange(symbol)
-                print(f"Signal symbol: {symbol} -> Exchange symbol: {mapped}")
+                print(f"{self.log_prefix} Signal symbol: {symbol} -> Exchange symbol: {mapped}")
                 
         except Exception as e:
-            print(f"Error in symbol format test: {str(e)}")
+            print(f"{self.log_prefix} Error in symbol format test: {str(e)}")
 
     def map_signal_symbol_to_exchange(self, signal_symbol: str) -> str:
         """Convert signal symbol format (e.g. BTCUSDT) to exchange format."""
@@ -425,7 +440,7 @@ class MEXC:
             # Get available balance
             balance = await self.fetch_balance("USDT")
             available_balance = float(balance) if balance else 0.0
-            print(f"Available Balance: {available_balance} USDT")
+            print(f"{self.log_prefix} Available Balance: {available_balance} USDT")
             
             # Get positions directly - MEXC provides im (current margin)
             positions = await self.fetch_all_open_positions()
@@ -433,14 +448,14 @@ class MEXC:
             if positions and "data" in positions:
                 for pos in positions["data"]:
                     position_margin += float(pos["im"])  # Current margin value
-            print(f"Position Initial Margin: {position_margin} USDT")
+            print(f"{self.log_prefix} Position Initial Margin: {position_margin} USDT")
             
             total_value = available_balance + position_margin
-            print(f"MEXC Initial Account Value: {total_value} USDT")
+            print(f"{self.log_prefix} MEXC Initial Account Value: {total_value} USDT")
             return total_value
             
         except Exception as e:
-            print(f"Error calculating initial account value: {str(e)}")
+            print(f"{self.log_prefix} Error calculating initial account value: {str(e)}")
             return 0.0
 
 
@@ -494,13 +509,13 @@ async def main():
     # await mexc.test_symbol_formats()
     
     # Test total account value calculation
-    print("\nTesting total account value calculation:")
+    print(f"{mexc.log_prefix} Testing total account value calculation:")
     total_value = await mexc.fetch_initial_account_value()
-    print(f"Final Total Account Value: {total_value} USDT")
+    print(f"{mexc.log_prefix} Final Total Account Value: {total_value} USDT")
     
     # End time
     end_time = datetime.datetime.now()
-    print(f"Time taken: {end_time - start_time}")
+    print(f"{mexc.log_prefix} Time taken: {end_time - start_time}")
 
 
 if __name__ == "__main__":
