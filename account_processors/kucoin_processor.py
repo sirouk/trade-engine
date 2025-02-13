@@ -462,15 +462,21 @@ class KuCoin:
             positions = await self.fetch_all_open_positions()
             position_margin = 0.0
             
-            # Check if positions is a valid response with data
-            if positions and isinstance(positions, dict) and "data" in positions:
-                for pos in positions:
-                    position_margin += float(pos["posInit"])  # Direct initial margin value
+            # Handle both empty positions and zero balance cases
+            if positions:
+                if isinstance(positions, list):
+                    for pos in positions:
+                        position_margin += float(pos["posInit"])  # Direct initial margin value
+                elif isinstance(positions, dict) and "data" in positions:
+                    for pos in positions["data"]:
+                        position_margin += float(pos["posInit"])
             
             print(f"{self.log_prefix} Position Initial Margin: {position_margin} USDT")
             
             total_value = available_balance + position_margin
-            print(f"{self.log_prefix} KuCoin Initial Account Value: {total_value} USDT")
+            if total_value == 0:
+                print(f"{self.log_prefix} Warning: Account has zero total value")
+            print(f"{self.log_prefix} Initial Account Value: {total_value} USDT")
             return total_value
             
         except Exception as e:
