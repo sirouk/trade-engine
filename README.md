@@ -344,3 +344,97 @@ pm2 stop tradingview-endpoint      # Stop TradingView endpoint
 pm2 stop bittensor-signals         # Stop Bittensor signal processor
 pm2 stop trade-engine              # Stop trade engine
 ```
+
+## How It Works
+
+### TLDR
+The trade engine continuously monitors multiple signal sources (like TradingView and Bittensor), combines their signals using configurable weights, calculates target positions based on account values, and executes trades across multiple exchanges simultaneously. Changes in signal depths or timing trigger position reconciliation, while a caching system prevents redundant executions.
+
+### System Flow Diagram
+```
+Signal Sources                Signal Processing                Position Management              Execution
+┌──────────────┐             ┌─────────────────┐             ┌──────────────────┐            ┌──────────────┐
+│ TradingView  │─┐           │  SignalManager  │             │  TradeExecutor   │            │    ByBit     │
+│ (Webhooks)   │ │           │ ┌─────────────┐ │             │ ┌──────────────┐ │            └──────────────┘
+└──────────────┘ │ Signals   │ │   Weight    │ │   Weighted  │ │   Account    │ │  Position   ┌──────────────┐
+                  ├─────────► │ │Configuration│ │   Depths    │ │   Value      │ │  Changes    │    BloFin    │
+┌──────────────┐ │           │ └─────────────┘ │ ──────────► │ └──────────────┘ │ ──────────► └──────────────┘
+│  Bittensor   │─┘           │ ┌─────────────┐ │             │ ┌──────────────┐ │            ┌──────────────┐
+│  (Network)   │             │ │   Signal    │ │             │ │   Position   │ │            │    KuCoin    │
+└──────────────┘             │ │  Processing │ │             │ │ Calculation  │ │            └──────────────┘
+                              │ └─────────────┘ │             │ └──────────────┘ │            ┌──────────────┐
+                              └────────┬────────┘             └────────┬─────────┘            │     MEXC     │
+                                      │                                │                       └──────────────┘
+ ┌──────────────┐                     │                                │
+ │    Cache     │◄────────────────────┴────────────────────────────────
+ └──────────────┘
+```
+
+### Detailed System Operation
+
+#### 1. Signal Collection & Processing
+- **Signal Processors** fetch raw data from external sources:
+  - TradingView: Receives webhook signals from TradingView alerts
+  - Bittensor: Fetches network signals at regular intervals
+- Each processor normalizes signals into a standard format containing:
+  - Symbol (e.g., BTCUSDT)
+  - Depth (position size as fraction of account)
+  - Timestamp
+  - Additional metadata (leverage, etc.)
+- Raw signals are stored in their respective directories with atomic file operations
+
+#### 2. Signal Aggregation & Weighting
+- **SignalManager** (`core/signal_manager.py`) orchestrates signal processing:
+  - Loads and initializes enabled signal processors
+  - Loads weight configuration from `signal_weight_config.json`
+  - Loads asset mappings from `asset_mapping_config.json`
+  - Retrieves current signals from each processor
+  - Compares new signals with previous ones (stored in `self.previous_signals`)
+  - Only triggers updates on depth or timestamp changes
+  - Applies configured weights to calculate final position depths
+  - Maintains cache in `account_asset_depths.json`
+
+#### 3. Position Management
+- **TradeExecutor** (`execute_trades.py`) manages trade execution:
+  - Loads signal weight configuration for target allocations
+  - Creates SignalManager instance to monitor updates
+  - For each enabled account:
+    - Fetches total account value including positions
+    - Calculates target position sizes based on weighted depths
+    - Converts USDT values to asset quantities using current prices
+    - Determines required leverage and margin modes
+
+#### 4. Exchange Integration
+- **Account Processors** handle exchange-specific operations:
+  - Implement unified interface for different exchanges
+  - Handle symbol format conversion
+  - Manage exchange-specific API calls
+  - Special case handling:
+    - Position flips require closing before reopening
+    - Leverage changes may require position closure
+    - Margin mode changes need special handling
+  - Position reconciliation logic:
+    - Calculate size differences
+    - Determine order types and sides
+    - Execute necessary trades
+
+#### 5. State Management & Configuration
+- System maintains multiple state files:
+  - `signal_weight_config.json`: Source weights and leverage
+  - `asset_mapping_config.json`: Symbol standardization
+  - `account_asset_depths.json`: Position cache
+- Dynamic configuration updates:
+  - Weight changes: No restart required
+  - Asset mapping: Automatic detection
+  - Processor code: Service restart needed
+
+#### 6. Error Handling & Reliability
+- Comprehensive error handling:
+  - API timeouts with configurable retries
+  - Invalid signal detection and filtering
+  - Position reconciliation failure recovery
+- Cache system prevents duplicate executions
+- Atomic file operations ensure data consistency
+- Asynchronous execution for improved performance
+
+This architecture provides a robust framework for managing positions across multiple exchanges based on weighted signals from various sources. The system's modular design allows easy addition of new signal sources or exchanges while maintaining reliability through careful state management and error handling.
