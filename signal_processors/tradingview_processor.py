@@ -46,7 +46,7 @@ class TradingViewProcessor:
             signals, symbol_dates = self._parse_signal_file(file_path, signals, symbol_dates)
         return signals
 
-    def _get_recent_files(self, directory, days=70):
+    def _get_recent_files(self, directory, days=60):
         """Retrieve files modified within the last `days`."""
         cutoff = datetime.now() - timedelta(days=days)
         recent_files = []
@@ -148,7 +148,7 @@ class TradingViewProcessor:
                 }
         return signals, symbol_dates
 
-    def _archive_old_files(self, days=3):
+    def _archive_old_files(self, days=60):
         """Archive files older than specified days."""
         if not os.path.exists(self.ARCHIVE_DIR):
             os.makedirs(self.ARCHIVE_DIR)
