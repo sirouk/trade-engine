@@ -4,6 +4,7 @@ import os
 from typing import Dict, List, Set
 import importlib
 import inspect
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +22,13 @@ class SignalManager:
         self.config = self._load_config()
         self.previous_signals = {}  # Track previous raw signals
         self._temp_depths = {}  # Initialize temp depths
-        self._load_cache()
         self._initialize_processors()
         self.processors = self.signal_processors  # For compatibility with existing code
         self._last_asset_mapping_check = 0  # Track last time we checked asset mapping config
+        # Add lock for cache operations
+        self._cache_lock = asyncio.Lock()
+        self._pending_updates = {}  # Track pending cache updates by account
+        self.account_asset_depths = self._load_cache()
     
     def _load_config(self) -> dict:
         """Load signal weight configuration."""
@@ -39,14 +43,19 @@ class SignalManager:
         """Load cached account-asset depths."""
         try:
             with open(self.CACHE_FILE, 'r') as f:
-                self.account_asset_depths = json.load(f)
+                return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            self.account_asset_depths = {}
+            return {}
     
-    def _save_cache(self):
+    async def _save_cache(self):
         """Save account-asset depths to cache."""
-        with open(self.CACHE_FILE, 'w') as f:
-            json.dump(self.account_asset_depths, f, indent=4)
+        try:
+            with open(self.CACHE_FILE, 'w') as f:
+                json.dump(self.account_asset_depths, f, indent=4)
+            # Force sync to filesystem
+            os.fsync(f.fileno())
+        except Exception as e:
+            logger.error(f"Error saving cache: {str(e)}")
     
     def _initialize_processors(self):
         """Initialize signal and account processors."""
@@ -234,10 +243,28 @@ class SignalManager:
         
         return updates
     
-    def confirm_execution(self, account_name: str, success: bool):
+    async def confirm_execution(self, account_name: str, success: bool):
         """Confirm successful execution for an account and update its cache."""
-        if success and hasattr(self, '_temp_depths'):
-            if account_name in self._temp_depths:
-                self.account_asset_depths[account_name] = self._temp_depths[account_name]
-                self._save_cache()
-                logger.info(f"Updated cache for {account_name}") 
+        try:
+            if success and hasattr(self, '_temp_depths'):
+                if account_name in self._temp_depths:
+                    async with self._cache_lock:
+                        current_cache = self._load_cache()
+                        current_cache[account_name] = self._temp_depths[account_name]
+                        self.account_asset_depths = current_cache
+                        await self._save_cache()
+                        logger.info(f"Updated cache for {account_name}")
+        except Exception as e:
+            logger.error(f"Error updating cache for {account_name}: {str(e)}")
+
+    async def _update_cache(self, account_name: str):
+        """Handle the actual cache update with locking."""
+        async with self._cache_lock:
+            if account_name not in self.previous_signals:
+                self.previous_signals[account_name] = {}
+            
+            current_cache = self._load_cache()
+            current_cache[account_name] = self._temp_depths[account_name]
+            self.account_asset_depths = current_cache
+            await self._save_cache()
+            logger.info(f"Updated cache for {account_name}") 

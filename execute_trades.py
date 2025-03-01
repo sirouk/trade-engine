@@ -131,13 +131,17 @@ class TradeExecutor:
                         leverage=symbol_config.get('leverage', 1),
                         margin_mode="isolated"
                     )
-                return True, None
+                # Update cache after setting all positions to zero
+                await self.signal_manager.confirm_execution(account.exchange_name, True)
+                return True, None  # Return True since we successfully set positions to zero
                 
             # Get total account value (including positions)
             total_value = await account.fetch_initial_account_value()
             if not total_value:
                 logger.warning(f"No account value found for {account.exchange_name}")
-                return False, "No account value found"
+                # Still update cache even with zero balance
+                await self.signal_manager.confirm_execution(account.exchange_name, True)
+                return False, None
 
             logger.info(f"Processing {account.exchange_name} with total value: {total_value}")
 
@@ -192,6 +196,10 @@ class TradeExecutor:
                     margin_mode="isolated"
                 )
 
+            # Update cache after successful execution
+            await self.signal_manager.confirm_execution(account.exchange_name, True)
+            
+            logger.info(f"Updated cache for {account.exchange_name}")
             return True, None
 
         except Exception as e:
