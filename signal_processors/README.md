@@ -54,7 +54,7 @@ The TradingView processor (`tradingview_processor.py`) is not run directly by PM
 
 The Bittensor signal processor fetches and processes signals from the Bittensor network. It:
 - Fetches and ranks miners based on their performance
-- Prepares signals at regular intervals (every 60 seconds)
+- Prepares signals at high frequency intervals (every 0.5 seconds)
 - Stores signals to disk with atomic operations
 - Automatically archives old signal files
 - Dynamically reloads configuration changes
