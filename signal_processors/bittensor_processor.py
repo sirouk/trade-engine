@@ -30,7 +30,7 @@ class BittensorProcessor:
     RAW_SIGNALS_DIR = "raw_signals/bittensor"
     ARCHIVE_DIR = "raw_signals/bittensor/archive"
     SIGNAL_FILE_PREFIX = "bittensor_signal"
-    SIGNAL_FREQUENCY = 1  # seconds between signal preparations
+    SIGNAL_FREQUENCY = 0.5  # seconds between signal preparations
     ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     PROCESSOR_CONFIG = "bittensor_processor_config.json"
     
