@@ -30,7 +30,7 @@ class BittensorProcessor:
     RAW_SIGNALS_DIR = "raw_signals/bittensor"
     ARCHIVE_DIR = "raw_signals/bittensor/archive"
     SIGNAL_FILE_PREFIX = "bittensor_signal"
-    SIGNAL_FREQUENCY = 0.5  # seconds between signal preparations
+    SIGNAL_FREQUENCY = 2.0  # seconds between signal preparations
     ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     PROCESSOR_CONFIG = "bittensor_processor_config.json"
     
@@ -358,12 +358,28 @@ class BittensorProcessor:
         headers = {'Content-Type': 'application/json'}
         data = {'api_key': self.credentials.bittensor_sn8.api_key}
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(self.credentials.bittensor_sn8.endpoint, json=data, headers=headers) as response:
-                if response.status == 200:
-                    return await response.json(loads=ujson.loads)
-                print(f"Failed to fetch data: {response.status}")
-                return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Add timeout parameter to prevent hanging
+                async with session.get(
+                    self.credentials.bittensor_sn8.endpoint, 
+                    json=data, 
+                    headers=headers,
+                    timeout=3  # 3 second timeout
+                ) as response:
+                    if response.status == 200:
+                        return await response.json(loads=ujson.loads)
+                    logger.error(f"Failed to fetch data: {response.status}")
+                    return None
+        except asyncio.TimeoutError:
+            logger.error("Timeout error while fetching signals from Bittensor API")
+            return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Connection error while fetching signals: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error while fetching signals: {e}")
+            return None
 
     def _store_signal_on_disk(self, data):
         """Store raw signal data to disk using atomic operations."""
