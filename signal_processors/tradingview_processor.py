@@ -120,8 +120,8 @@ class TradingViewProcessor:
                         depth = 0.0
                     elif "/" in size:
                         numerator, denominator = map(float, size.split("/"))
-                        depth = abs(numerator / denominator)
-                        if numerator < 0:
+                        depth = abs(numerator) / abs(denominator)
+                        if numerator < 0 or direction == "short":
                             depth = -depth
                     else:
                         print(f"Unexpected size format: {size}")
