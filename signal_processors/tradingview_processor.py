@@ -64,6 +64,10 @@ class TradingViewProcessor:
         """Parse a signal file and update signals with the latest data."""
         if self.verbose:
             print(f"\nProcessing file: {file_path}")
+        
+        # First, collect all signals from the file
+        all_signals = []
+        
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
@@ -97,15 +101,6 @@ class TradingViewProcessor:
                     print(f"Invalid timestamp in line: {line}")
                     continue
 
-                # Skip if we already have a newer signal
-                if symbol in symbol_dates and line_timestamp < symbol_dates[symbol]:
-                    if self.verbose:
-                        print(f"Skipping older signal for {symbol}. Current: {symbol_dates[symbol]}, This: {line_timestamp}")
-                    continue
-                if self.verbose:
-                    print(f"Using signal for {symbol}. Timestamp: {line_timestamp}")
-                symbol_dates[symbol] = line_timestamp
-
                 # Validate and parse direction
                 direction = signal_data.get("direction")
                 if direction not in ["long", "short", "flat"]:
@@ -137,16 +132,160 @@ class TradingViewProcessor:
                     print(f"Price parsing error in line: {line}")
                     continue
 
-                # Update signals
-                signals[symbol] = {
+                # Store the signal with all its data
+                signal_entry = {
                     "symbol": symbol,
-                    "original_symbols": [original_symbol],
+                    "original_symbol": original_symbol,
+                    "direction": direction,
                     "depth": depth,
                     "price": price if price is not None and price > 0 else None,
-                    "average_price": None,
                     "timestamp": line_timestamp,
+                    "original_timestamp": line_timestamp.isoformat(),  # Preserve original timestamp
+                    "raw_data": signal_data  # Keep raw data for audit purposes
                 }
+                
+                all_signals.append(signal_entry)
+        
+        # Now process signals with race condition handling
+        # Group signals by symbol
+        symbol_signals = {}
+        for signal in all_signals:
+            symbol = signal["symbol"]
+            if symbol not in symbol_signals:
+                symbol_signals[symbol] = []
+            symbol_signals[symbol].append(signal)
+        
+        # Process each symbol's signals
+        for symbol, symbol_signal_list in symbol_signals.items():
+            # Sort by timestamp
+            symbol_signal_list.sort(key=lambda x: x["timestamp"])
+            
+            # Handle race conditions for close timestamps
+            processed_signals = self._handle_race_conditions(symbol_signal_list)
+            
+            # Find the most recent valid signal
+            latest_signal = None
+            latest_timestamp = None
+            
+            for signal in processed_signals:
+                # Skip if we already have a newer signal from another file
+                if symbol in symbol_dates and signal["timestamp"] < symbol_dates[symbol]:
+                    if self.verbose:
+                        print(f"Skipping older signal for {symbol}. Current: {symbol_dates[symbol]}, This: {signal['timestamp']}")
+                    continue
+                
+                latest_signal = signal
+                latest_timestamp = signal["timestamp"]
+            
+            # Update the signals dictionary with the latest signal
+            if latest_signal:
+                if self.verbose:
+                    print(f"Using signal for {symbol}. Timestamp: {latest_timestamp}")
+                symbol_dates[symbol] = latest_timestamp
+                
+                signals[symbol] = {
+                    "symbol": symbol,
+                    "original_symbols": [latest_signal["original_symbol"]],
+                    "depth": latest_signal["depth"],
+                    "price": latest_signal["price"],
+                    "average_price": None,
+                    "timestamp": latest_signal["timestamp"],
+                    "audit": {
+                        "original_timestamp": latest_signal["original_timestamp"],
+                        "adjusted": latest_signal.get("timestamp_adjusted", False),
+                        "adjustment_reason": latest_signal.get("adjustment_reason", None)
+                    }
+                }
+                
         return signals, symbol_dates
+
+    def _handle_race_conditions(self, signal_list):
+        """Handle race conditions when signals are very close in time.
+        
+        Specifically targets the pattern where a position close (flat) and 
+        a new position open arrive in quick succession, which should be 
+        processed as a single position transition.
+        """
+        if len(signal_list) < 2:
+            return signal_list
+        
+        # Define threshold for "close" timestamps (5 seconds for single-threaded strategies)
+        CLOSE_THRESHOLD = timedelta(seconds=5)
+        
+        processed = []
+        i = 0
+        
+        while i < len(signal_list):
+            current = signal_list[i]
+            
+            # Only look for race conditions if current signal is involved in a position transition
+            if current["direction"] in ["flat", "long", "short"]:
+                # Look for the specific pattern: flat followed by position, or position followed by flat
+                if i + 1 < len(signal_list):
+                    next_signal = signal_list[i + 1]
+                    time_diff = next_signal["timestamp"] - current["timestamp"]
+                    
+                    # Check if this is a position transition pattern within threshold
+                    if time_diff <= CLOSE_THRESHOLD:
+                        is_transition = False
+                        transition_group = []
+                        
+                        # Pattern 1: Position followed by flat (wrong order - needs reordering)
+                        if (current["direction"] in ["long", "short"] and 
+                            next_signal["direction"] == "flat"):
+                            is_transition = True
+                            # Reorder: flat should come first
+                            transition_group = [next_signal, current]
+                            if self.verbose:
+                                print(f"Detected out-of-order position transition for {current['symbol']}: "
+                                      f"{current['direction']} -> flat")
+                        
+                        # Pattern 2: Flat followed by position (correct order - keep as is)
+                        elif (current["direction"] == "flat" and 
+                              next_signal["direction"] in ["long", "short"]):
+                            is_transition = True
+                            transition_group = [current, next_signal]
+                            if self.verbose:
+                                print(f"Detected position transition for {current['symbol']}: "
+                                      f"flat -> {next_signal['direction']}")
+                        
+                        if is_transition:
+                            # Adjust timestamps to maintain order
+                            base_time = transition_group[0]["timestamp"]
+                            for idx, signal in enumerate(transition_group):
+                                if idx > 0:
+                                    # Add microseconds to ensure proper ordering
+                                    signal["timestamp"] = base_time + timedelta(microseconds=idx * 1000)
+                                    signal["timestamp_adjusted"] = True
+                                    signal["adjustment_reason"] = "position_transition_reorder"
+                            
+                            processed.extend(transition_group)
+                            i += 2  # Skip the next signal as we've already processed it
+                            continue
+            
+            # No race condition detected, add signal as-is
+            processed.append(current)
+            i += 1
+        
+        return processed
+    
+    def _reorder_position_transitions(self, signal_group):
+        """DEPRECATED: Replaced by more targeted logic in _handle_race_conditions.
+        
+        This method is kept for backward compatibility but is no longer used.
+        """
+        # Separate flat and position signals
+        flat_signals = [s for s in signal_group if s["direction"] == "flat"]
+        position_signals = [s for s in signal_group if s["direction"] in ["long", "short"]]
+        
+        # If we have both flat and position signals, ensure flat comes first
+        if flat_signals and position_signals:
+            if self.verbose:
+                print(f"Reordering signals for proper position transition")
+            return flat_signals + position_signals
+        
+        # Otherwise, keep original order
+        return signal_group
 
     def _archive_old_files(self, days=60):
         """Archive files older than specified days."""
