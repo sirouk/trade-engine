@@ -273,6 +273,86 @@ Example signal weight configuration file:
 
 To update either configuration later, simply rerun the respective configuration script.
 
+## Adding a New Trading Pair
+
+To add a new trading pair (e.g., TAOUSDT) to your existing configuration:
+
+### Step 1: Add Asset Mappings
+
+Run the asset mapping configuration:
+
+```bash
+cd $HOME/trade-engine
+source .venv/bin/activate
+python3 config/asset_mapping.py
+```
+
+For each signal source:
+1. Choose **'k' (keep all existing mappings)** when prompted
+2. Add the new pair mapping:
+
+Example session:
+```
+Current mappings for tradingview:
+  BTCUSDT -> BTCUSDT
+  ETHUSDT -> ETHUSDT
+
+What would you like to do with existing mappings?
+  k - keep all existing mappings
+  m - modify existing mappings one by one
+  n - start fresh with no mappings
+Choose (k/m/n): k
+
+Configuring mappings for tradingview
+Enter source asset symbol (e.g., ETHUSD) or press Enter to finish: TAOUSDT
+Enter translated asset symbol for TAOUSDT: TAOUSDT
+Enter source asset symbol (e.g., ETHUSD) or press Enter to finish: [Press Enter]
+
+Current mappings for bittensor:
+  BTCUSD -> BTCUSDT
+  ETHUSD -> ETHUSDT
+
+What would you like to do with existing mappings?
+  k - keep all existing mappings
+Choose (k/m/n): k
+
+Configuring mappings for bittensor
+Enter source asset symbol (e.g., ETHUSD) or press Enter to finish: TAOUSD
+Enter translated asset symbol for TAOUSD: TAOUSDT
+Enter source asset symbol (e.g., ETHUSD) or press Enter to finish: [Press Enter]
+```
+
+### Step 2: Configure Signal Weights
+
+Run the signal weights configuration:
+
+```bash
+python3 config/signal_weights.py
+```
+
+The script will automatically detect the new pair from your asset mappings and prompt you to configure it:
+
+```
+Configuring TAOUSDT
+Enter leverage for TAOUSDT: 3
+Assign weight for TAOUSDT from tradingview (remaining weight: 1.00): 0.10
+Assign weight for TAOUSDT from bittensor (remaining weight: 0.90): 0.15
+```
+
+### Step 3: No Restart Required
+
+Both changes are picked up dynamically:
+- Asset mappings take effect in the next processing cycle
+- Signal weights take effect in the next trade engine loop
+
+The system will automatically start processing TAOUSDT signals and executing trades based on your configured weights.
+
+### Notes:
+- You can add multiple pairs in one session by entering them one after another
+- Press Enter without typing to move to the next signal source or finish
+- The configuration maintains the order of your entries
+- Make sure the trading pair is available on your configured exchanges
+
 ## Running the Trade Engine
 
 First, start the signal processors. See the respective documentation for detailed setup:
