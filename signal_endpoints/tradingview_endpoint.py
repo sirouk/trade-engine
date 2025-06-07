@@ -12,10 +12,15 @@ from signal_processors.tradingview_processor import TradingViewProcessor
 
 def setup_domain(domain_name):
     # Install required packages for Certbot and NGINX
-    subprocess.run(["sudo", "apt", "install", "-y", "nginx-full", "certbot"], check=True)
+    subprocess.run(["sudo", "apt", "install", "-y", "nginx-full"], check=True)
+    subprocess.run(["sudo", "snap", "install", "--classic", "certbot"], check=True)
 
     # Download and configure the acme-dns-auth script for Certbot
     acme_dns_script = "/etc/letsencrypt/acme-dns-auth.py"
+    
+    # Create the /etc/letsencrypt directory if it doesn't exist
+    subprocess.run(["sudo", "mkdir", "-p", "/etc/letsencrypt"], check=True)
+    
     if not os.path.exists(acme_dns_script):
         subprocess.run(
             [
@@ -27,14 +32,16 @@ def setup_domain(domain_name):
             check=True,
         )
         subprocess.run(["chmod", "+x", "/tmp/acme-dns-auth.py"], check=True)
-        subprocess.run(["sudo", "mv", "/tmp/acme-dns-auth.py", acme_dns_script], check=True)
-
-        # Replace the top line with the python3 shebang
-        with open(acme_dns_script, "r") as f:
+        
+        # Replace the top line with the python3 shebang before moving
+        with open("/tmp/acme-dns-auth.py", "r") as f:
             lines = f.readlines()
-            lines[0] = "#!/usr/bin/env python3\n"
-        with open(acme_dns_script, "w") as f:
+        lines[0] = "#!/usr/bin/env python3\n"
+        with open("/tmp/acme-dns-auth.py", "w") as f:
             f.writelines(lines)
+        
+        # Now move the modified file
+        subprocess.run(["sudo", "mv", "/tmp/acme-dns-auth.py", acme_dns_script], check=True)
 
     # Define NGINX config paths
     nginx_config_path = f"/etc/nginx/sites-available/{domain_name}"
@@ -79,7 +86,7 @@ def setup_domain(domain_name):
     subprocess.run(
         [
             "sudo",
-            "/usr/bin/certbot",
+            "certbot",
             "certonly",
             "--manual",
             "--manual-auth-hook",
@@ -106,6 +113,10 @@ app = FastAPI()
 # Get the signal file prefix from the processor
 SIGNAL_FILE_PREFIX = TradingViewProcessor.SIGNAL_FILE_PREFIX
 
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
 @app.post("/")
 async def tradingview_webhook(request: Request):
     
@@ -131,6 +142,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         domain_name = sys.argv[1]
         setup_domain(domain_name)
+        print(f"Domain {domain_name} setup complete.")
+        quit()
     else:
         print("No domain provided. Running FastAPI without domain setup.")
 
