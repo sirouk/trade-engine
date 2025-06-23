@@ -166,7 +166,7 @@ class KuCoin:
             print(f"{self.log_prefix} Error fetching tickers: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
-        """Fetch instrument details including tick size, lot size, and contract value."""
+        """Fetch instrument details including tick size, lot size, max size, and contract value."""
         # Fetch the instrument details from the market client
         instrument = self.market_client.get_contract_detail(symbol)
 
@@ -176,8 +176,10 @@ class KuCoin:
             min_lots = float(instrument["lotSize"])      # Minimum order size in lots
             tick_size = float(instrument["tickSize"])    # Tick size for price
             contract_value = float(instrument["multiplier"])  # Contract value/multiplier
+            # KuCoin uses maxOrderQty for maximum order quantity
+            max_size = float(instrument.get("maxOrderQty", 1000000))  # Default to large number if not specified
 
-            return lot_size, min_lots, tick_size, contract_value
+            return lot_size, min_lots, tick_size, contract_value, max_size
         raise ValueError(f"Symbol {symbol} not found.")
     
     async def _place_limit_order_test(self, ):
@@ -197,7 +199,7 @@ class KuCoin:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
 
             # Fetch and scale the size and price
             lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
@@ -238,10 +240,8 @@ class KuCoin:
         try:
             print(f"{self.log_prefix} Opening a {side} position for {size} lots of {symbol} with {leverage}x leverage.")
             
-            client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
 
             # If the size is already in lot size, don't scale it
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
@@ -249,33 +249,126 @@ class KuCoin:
             
             kucoin_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
             
-            if adjust_margin_mode:
-                print(f"{self.log_prefix} Adjusting account margin mode to {kucoin_margin_mode}.")
-                try:
-                    await execute_with_timeout(
-                        self.trade_client.modify_margin_mode,
+            # Check if order size exceeds maximum order quantity
+            if lots > max_size:
+                print(f"{self.log_prefix} Order size {lots} exceeds max order qty {max_size}. Splitting into chunks.")
+                
+                # Calculate number of full chunks and remainder
+                num_full_chunks = int(lots // max_size)
+                remainder = lots % max_size
+                
+                # Round remainder to lot size precision
+                decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
+                remainder = float(f"%.{decimal_places}f" % remainder)
+                
+                orders = []
+                total_executed = 0
+                
+                # Place full-sized chunks
+                for i in range(num_full_chunks):
+                    chunk_size = max_size
+                    print(f"{self.log_prefix} Placing chunk {i+1}/{num_full_chunks + (1 if remainder > 0 else 0)}: {chunk_size} lots")
+                    
+                    client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    # Only adjust margin mode on first chunk
+                    if i == 0 and adjust_margin_mode:
+                        print(f"{self.log_prefix} Adjusting account margin mode to {kucoin_margin_mode}.")
+                        try:
+                            await execute_with_timeout(
+                                self.trade_client.modify_margin_mode,
+                                timeout=5,
+                                symbol=symbol,
+                                marginMode=kucoin_margin_mode,
+                            )
+                        except Exception as e:
+                            print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
+                    
+                    # Place the market order with size in contracts
+                    order = await execute_with_timeout(
+                        self.trade_client.create_market_order,
                         timeout=5,
                         symbol=symbol,
+                        side=side.lower(),
+                        size=chunk_size,
+                        lever=leverage,
                         marginMode=kucoin_margin_mode,
+                        clientOid=client_oid
                     )
-                except Exception as e:
-                    print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
+                    orders.append(order)
+                    total_executed += chunk_size
+                    print(f"{self.log_prefix} Chunk order placed: {order}")
                     
-            print(f"{self.log_prefix} Placing a market order for {lots} lots of {symbol} with {kucoin_margin_mode} margin mode and {leverage}x leverage.")
+                    # Small delay between orders to avoid rate limiting
+                    await asyncio.sleep(0.1)
+                
+                # Place remainder if exists
+                if remainder > 0:
+                    print(f"{self.log_prefix} Placing final chunk: {remainder} lots")
+                    client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    # Only adjust margin mode if this is the first (and only) chunk
+                    if num_full_chunks == 0 and adjust_margin_mode:
+                        print(f"{self.log_prefix} Adjusting account margin mode to {kucoin_margin_mode}.")
+                        try:
+                            await execute_with_timeout(
+                                self.trade_client.modify_margin_mode,
+                                timeout=5,
+                                symbol=symbol,
+                                marginMode=kucoin_margin_mode,
+                            )
+                        except Exception as e:
+                            print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
+                    
+                    # Place the market order with size in contracts
+                    order = await execute_with_timeout(
+                        self.trade_client.create_market_order,
+                        timeout=5,
+                        symbol=symbol,
+                        side=side.lower(),
+                        size=remainder,
+                        lever=leverage,
+                        marginMode=kucoin_margin_mode,
+                        clientOid=client_oid
+                    )
+                    orders.append(order)
+                    total_executed += remainder
+                    print(f"{self.log_prefix} Final chunk order placed: {order}")
+                
+                print(f"{self.log_prefix} Successfully executed {total_executed} lots across {len(orders)} orders")
+                return orders  # Return list of orders
             
-            # Place the market order with size in contracts
-            order = await execute_with_timeout(
-                self.trade_client.create_market_order,
-                timeout=5,
-                symbol=symbol,
-                side=side.lower(),
-                size=lots,  # KuCoin expects size in contracts, already handled by scale_size_and_price
-                lever=leverage,
-                marginMode=kucoin_margin_mode,
-                clientOid=client_oid
-            )
-            print(f"{self.log_prefix} Market Order Placed: {order}")
-            return order
+            else:
+                # Order size is within limits, proceed normally
+                client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                
+                if adjust_margin_mode:
+                    print(f"{self.log_prefix} Adjusting account margin mode to {kucoin_margin_mode}.")
+                    try:
+                        await execute_with_timeout(
+                            self.trade_client.modify_margin_mode,
+                            timeout=5,
+                            symbol=symbol,
+                            marginMode=kucoin_margin_mode,
+                        )
+                    except Exception as e:
+                        print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
+                        
+                print(f"{self.log_prefix} Placing a market order for {lots} lots of {symbol} with {kucoin_margin_mode} margin mode and {leverage}x leverage.")
+                
+                # Place the market order with size in contracts
+                order = await execute_with_timeout(
+                    self.trade_client.create_market_order,
+                    timeout=5,
+                    symbol=symbol,
+                    side=side.lower(),
+                    size=lots,  # KuCoin expects size in contracts, already handled by scale_size_and_price
+                    lever=leverage,
+                    marginMode=kucoin_margin_mode,
+                    clientOid=client_oid
+                )
+                print(f"{self.log_prefix} Market Order Placed: {order}")
+                return order
 
         except Exception as e:
             print(f"{self.log_prefix} Error placing market order: {str(e)}")
@@ -328,7 +421,7 @@ class KuCoin:
             current_position = unified_positions[0] if unified_positions else None
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
 
             # Scale the target size to match exchange requirements
             #if size != 0:
@@ -539,6 +632,44 @@ async def main():
     print(f"{kucoin.log_prefix} Testing total account value calculation:")
     total_value = await kucoin.fetch_initial_account_value()
     print(f"{kucoin.log_prefix} Final Total Account Value: {total_value} USDT")
+    
+    # Test fetching max order quantity for BTC
+    print(f"\n{kucoin.log_prefix} Testing symbol details and max order quantity:")
+    try:
+        symbol = "XBTUSDTM"
+        lot_size, min_size, tick_size, contract_value, max_size = await kucoin.get_symbol_details(symbol)
+        print(f"{kucoin.log_prefix} Symbol: {symbol}")
+        print(f"{kucoin.log_prefix} Lot Size: {lot_size}")
+        print(f"{kucoin.log_prefix} Min Order Qty: {min_size}")
+        print(f"{kucoin.log_prefix} Max Order Qty: {max_size}")
+        print(f"{kucoin.log_prefix} Tick Size: {tick_size}")
+        print(f"{kucoin.log_prefix} Contract Value: {contract_value}")
+        
+        # Get full contract details
+        contract = kucoin.market_client.get_contract_detail(symbol)
+        print(f"\n{kucoin.log_prefix} Full contract details for {symbol}:")
+        for key in ["maxOrderQty", "maxPrice", "lotSize", "tickSize", "multiplier", "maxRiskLimit", "minRiskLimit"]:
+            if key in contract:
+                print(f"{kucoin.log_prefix} {key}: {contract[key]}")
+    except Exception as e:
+        print(f"{kucoin.log_prefix} Error testing symbol details: {str(e)}")
+    
+    # Test order chunking demonstration (commented out to avoid actual trading)
+    """
+    print(f"\n{kucoin.log_prefix} Testing order chunking with large order:")
+    try:
+        # This would test chunking if the order exceeds max_size
+        result = await kucoin.open_market_position(
+            symbol="XBTUSDTM",
+            side="buy",
+            size=1000,  # Large size to test chunking
+            leverage=5,
+            margin_mode="isolated"
+        )
+        print(f"{kucoin.log_prefix} Order result: {result}")
+    except Exception as e:
+        print(f"{kucoin.log_prefix} Error testing order chunking: {str(e)}")
+    """
     
     # End time
     end_time = datetime.datetime.now()

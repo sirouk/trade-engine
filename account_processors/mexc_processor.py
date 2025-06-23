@@ -174,7 +174,7 @@ class MEXC:
             print(f"{self.log_prefix} Error fetching tickers from MEXC: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
-        """Fetch instrument details including lot size, min size, tick size, and contract value."""
+        """Fetch instrument details including lot size, min size, tick size, max size, and contract value."""
         try:
             # Fetch all contract details for the given symbol
             response = await execute_with_timeout(
@@ -197,8 +197,10 @@ class MEXC:
             min_lots = float(instrument["minVol"])           # Minimum trade size in lots (e.g., 1)
             tick_size = float(instrument["priceUnit"])       # Minimum price change (e.g., 0.1 USDT)
             contract_value = float(instrument["contractSize"])  # Value per contract
+            # MEXC uses maxVol for maximum order quantity
+            max_size = float(instrument.get("maxVol", 1000000))  # Default to large number if not specified
 
-            return lot_size, min_lots, tick_size, contract_value
+            return lot_size, min_lots, tick_size, contract_value, max_size
 
         except KeyError as e:
             raise ValueError(f"Missing expected key: {e}") from e
@@ -222,7 +224,7 @@ class MEXC:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
 
             # Fetch and scale the size and price
             lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
@@ -248,10 +250,8 @@ class MEXC:
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
         """Open a market position."""
         try:
-            client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
             
             # If the size is already in lot size, don't scale it
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
@@ -259,20 +259,89 @@ class MEXC:
             
             mexc_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
             
-            order = await execute_with_timeout(
-                self.futures_client.order,
-                timeout=5,  # Specify custom timeout
-                symbol=symbol,
-                vol=lots,
-                side=side,
-                price=0,  # Market order
-                type=2,  # Market order
-                open_type=mexc_margin_mode,
-                leverage=leverage,
-                external_oid=client_oid
-            )
-            print(f"{self.log_prefix} Market Order Placed: {order}")
-            return order
+            # Check if order size exceeds maximum order quantity
+            if lots > max_size:
+                print(f"{self.log_prefix} Order size {lots} exceeds max order qty {max_size}. Splitting into chunks.")
+                
+                # Calculate number of full chunks and remainder
+                num_full_chunks = int(lots // max_size)
+                remainder = lots % max_size
+                
+                # Round remainder to lot size precision
+                decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
+                remainder = float(f"%.{decimal_places}f" % remainder)
+                
+                orders = []
+                total_executed = 0
+                
+                # Place full-sized chunks
+                for i in range(num_full_chunks):
+                    chunk_size = max_size
+                    print(f"{self.log_prefix} Placing chunk {i+1}/{num_full_chunks + (1 if remainder > 0 else 0)}: {chunk_size} lots")
+                    
+                    client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    order = await execute_with_timeout(
+                        self.futures_client.order,
+                        timeout=5,
+                        symbol=symbol,
+                        vol=chunk_size,
+                        side=side,
+                        price=0,  # Market order
+                        type=2,  # Market order
+                        open_type=mexc_margin_mode,
+                        leverage=leverage,
+                        external_oid=client_oid
+                    )
+                    orders.append(order)
+                    total_executed += chunk_size
+                    print(f"{self.log_prefix} Chunk order placed: {order}")
+                    
+                    # Small delay between orders to avoid rate limiting
+                    await asyncio.sleep(0.1)
+                
+                # Place remainder if exists
+                if remainder > 0:
+                    print(f"{self.log_prefix} Placing final chunk: {remainder} lots")
+                    client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    order = await execute_with_timeout(
+                        self.futures_client.order,
+                        timeout=5,
+                        symbol=symbol,
+                        vol=remainder,
+                        side=side,
+                        price=0,  # Market order
+                        type=2,  # Market order
+                        open_type=mexc_margin_mode,
+                        leverage=leverage,
+                        external_oid=client_oid
+                    )
+                    orders.append(order)
+                    total_executed += remainder
+                    print(f"{self.log_prefix} Final chunk order placed: {order}")
+                
+                print(f"{self.log_prefix} Successfully executed {total_executed} lots across {len(orders)} orders")
+                return orders  # Return list of orders
+            
+            else:
+                # Order size is within limits, proceed normally
+                client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                
+                order = await execute_with_timeout(
+                    self.futures_client.order,
+                    timeout=5,  # Specify custom timeout
+                    symbol=symbol,
+                    vol=lots,
+                    side=side,
+                    price=0,  # Market order
+                    type=2,  # Market order
+                    open_type=mexc_margin_mode,
+                    leverage=leverage,
+                    external_oid=client_oid
+                )
+                print(f"{self.log_prefix} Market Order Placed: {order}")
+                return order
 
         except Exception as e:
             print(f"{self.log_prefix} Error placing market order: {str(e)}")
@@ -290,7 +359,10 @@ class MEXC:
             side = 2 if position["posSide"] == 1 else 4  # Reverse side
 
             print(f"{self.log_prefix} Closing {size} lots of {symbol} with market order.")
-            return await self.open_market_position(symbol, side, size, leverage=int(position["leverage"]))
+            # Get margin mode from position (1: isolated, 2: cross)
+            mexc_margin_mode = position.get("open_type", 1)
+            margin_mode = self.inverse_margin_mode_map.get(mexc_margin_mode, "isolated")
+            return await self.open_market_position(symbol, side, size, leverage=int(position["leverage"]), margin_mode=margin_mode)
         except Exception as e:
             print(f"{self.log_prefix} Error closing position: {str(e)}")
             
@@ -321,7 +393,7 @@ class MEXC:
             current_position = unified_positions[0] if unified_positions else None
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
             
             #if size != 0:
             # Always scale as we need lot_size
@@ -464,6 +536,8 @@ async def main():
     # Start a time
     start_time = datetime.datetime.now()
     
+    from core.utils.execute_timed import execute_with_timeout
+    
     mexc = MEXC()
     
     # balance = await mexc.fetch_balance(instrument="USDT")      # Fetch futures balance
@@ -512,6 +586,50 @@ async def main():
     print(f"{mexc.log_prefix} Testing total account value calculation:")
     total_value = await mexc.fetch_initial_account_value()
     print(f"{mexc.log_prefix} Final Total Account Value: {total_value} USDT")
+    
+    # Test fetching max order quantity
+    print(f"\n{mexc.log_prefix} Testing symbol details and max order quantity:")
+    try:
+        symbol = "BTC_USDT"
+        lot_size, min_size, tick_size, contract_value, max_size = await mexc.get_symbol_details(symbol)
+        print(f"{mexc.log_prefix} Symbol: {symbol}")
+        print(f"{mexc.log_prefix} Lot Size (contractSize): {lot_size}")
+        print(f"{mexc.log_prefix} Min Order Qty (minVol): {min_size}")
+        print(f"{mexc.log_prefix} Max Order Qty (maxVol): {max_size}")
+        print(f"{mexc.log_prefix} Tick Size (priceUnit): {tick_size}")
+        print(f"{mexc.log_prefix} Contract Value: {contract_value}")
+        
+        # Get full contract details
+        response = await execute_with_timeout(
+            mexc.futures_client.detail,
+            timeout=5,
+            symbol=symbol
+        )
+        if response.get("success", False):
+            contract = response["data"]
+            print(f"\n{mexc.log_prefix} Full contract details for {symbol}:")
+            for key in ["maxVol", "minVol", "contractSize", "priceUnit", "maxLeverage"]:
+                if key in contract:
+                    print(f"{mexc.log_prefix} {key}: {contract[key]}")
+    except Exception as e:
+        print(f"{mexc.log_prefix} Error testing symbol details: {str(e)}")
+    
+    # Test order chunking demonstration (commented out to avoid actual trading)
+    """
+    print(f"\n{mexc.log_prefix} Testing order chunking with large order:")
+    try:
+        # This would test chunking if the order exceeds max_size
+        result = await mexc.open_market_position(
+            symbol="BTC_USDT",
+            side=1,  # 1 for buy/long
+            size=1000,  # Large size to test chunking
+            leverage=5,
+            margin_mode="isolated"
+        )
+        print(f"{mexc.log_prefix} Order result: {result}")
+    except Exception as e:
+        print(f"{mexc.log_prefix} Error testing order chunking: {str(e)}")
+    """
     
     # End time
     end_time = datetime.datetime.now()

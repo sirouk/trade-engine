@@ -161,7 +161,7 @@ class BloFin:
             print(f"{self.log_prefix} Error fetching tickers from Blofin: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
-        """Fetch instrument details including tick size and lot size."""
+        """Fetch instrument details including tick size, lot size, and max size."""
         try:
             instruments = await execute_with_timeout(
                 self.blofin_client.public.get_instruments, # get_instruments_ct is not needed as it is the same as get_instruments
@@ -175,9 +175,15 @@ class BloFin:
                     min_size = float(instrument["minSize"])
                     tick_size = float(instrument["tickSize"])
                     contract_value = float(instrument["contractValue"])
+                    # BloFin uses maxMarketSize for market orders and maxLimitSize for limit orders
+                    max_market_size = float(instrument.get("maxMarketSize", 1000000))
+                    max_limit_size = float(instrument.get("maxLimitSize", max_market_size))
+                    # Use the market order limit as it's more restrictive
+                    max_size = max_market_size
                     
                     print(f"{self.log_prefix} Symbol {symbol} -> Lot Size: {lot_size}, Min Size: {min_size}, Tick Size: {tick_size}, Contract Value: {contract_value}")
-                    return lot_size, min_size, tick_size, contract_value
+                    print(f"{self.log_prefix} Max Limit Size: {max_limit_size}, Max Market Size: {max_market_size}")
+                    return lot_size, min_size, tick_size, contract_value, max_size
             raise ValueError(f"Symbol {symbol} not found.")
         except Exception as e:
             print(f"{self.log_prefix} Error fetching symbol details: {str(e)}")
@@ -201,7 +207,7 @@ class BloFin:
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
             
             # Fetch and scale the size and price
             lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
@@ -229,31 +235,102 @@ class BloFin:
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
         """Open a position with a market order on BloFin."""
         try:
-            client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
 
             # Fetch and scale the size
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
             print(f"{self.log_prefix} Processing {lots} lots of {symbol} with market order")
-
-            # Place the market order
-            order = await execute_with_timeout(
-                self.blofin_client.trading.place_order_ct,
-                timeout=5,
-                inst_id=symbol,
-                side=side.lower(),
-                position_side="net", # Adjust based on your account mode (e.g., 'net', 'long', 'short')
-                price=0, # required for market orders
-                size=lots,
-                leverage=leverage,
-                order_type="market",  # Market order type
-                margin_mode=margin_mode,
-                clientOrderId=client_order_id
-            )
-            print(f"{self.log_prefix} Market Order Placed: {order}")
-            return order
+            
+            # Check if order size exceeds maximum order quantity
+            if lots > max_size:
+                print(f"{self.log_prefix} Order size {lots} exceeds max order qty {max_size}. Splitting into chunks.")
+                
+                # Calculate number of full chunks and remainder
+                num_full_chunks = int(lots // max_size)
+                remainder = lots % max_size
+                
+                # Round remainder to lot size precision
+                decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
+                remainder = float(f"%.{decimal_places}f" % remainder)
+                
+                orders = []
+                total_executed = 0
+                
+                # Place full-sized chunks
+                for i in range(num_full_chunks):
+                    chunk_size = max_size
+                    print(f"{self.log_prefix} Placing chunk {i+1}/{num_full_chunks + (1 if remainder > 0 else 0)}: {chunk_size} lots")
+                    
+                    client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    # Place the market order
+                    order = await execute_with_timeout(
+                        self.blofin_client.trading.place_order_ct,
+                        timeout=5,
+                        inst_id=symbol,
+                        side=side.lower(),
+                        position_side="net",
+                        price=0,
+                        size=chunk_size,
+                        leverage=leverage,
+                        order_type="market",
+                        margin_mode=margin_mode,
+                        clientOrderId=client_order_id
+                    )
+                    orders.append(order)
+                    total_executed += chunk_size
+                    print(f"{self.log_prefix} Chunk order placed: {order}")
+                    
+                    # Small delay between orders to avoid rate limiting
+                    await asyncio.sleep(0.1)
+                
+                # Place remainder if exists
+                if remainder > 0:
+                    print(f"{self.log_prefix} Placing final chunk: {remainder} lots")
+                    client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    # Place the market order
+                    order = await execute_with_timeout(
+                        self.blofin_client.trading.place_order_ct,
+                        timeout=5,
+                        inst_id=symbol,
+                        side=side.lower(),
+                        position_side="net",
+                        price=0,
+                        size=remainder,
+                        leverage=leverage,
+                        order_type="market",
+                        margin_mode=margin_mode,
+                        clientOrderId=client_order_id
+                    )
+                    orders.append(order)
+                    total_executed += remainder
+                    print(f"{self.log_prefix} Final chunk order placed: {order}")
+                
+                print(f"{self.log_prefix} Successfully executed {total_executed} lots across {len(orders)} orders")
+                return orders  # Return list of orders
+            
+            else:
+                # Order size is within limits, proceed normally
+                client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                
+                # Place the market order
+                order = await execute_with_timeout(
+                    self.blofin_client.trading.place_order_ct,
+                    timeout=5,
+                    inst_id=symbol,
+                    side=side.lower(),
+                    position_side="net", # Adjust based on your account mode (e.g., 'net', 'long', 'short')
+                    price=0, # required for market orders
+                    size=lots,
+                    leverage=leverage,
+                    order_type="market",  # Market order type
+                    margin_mode=margin_mode,
+                    clientOrderId=client_order_id
+                )
+                print(f"{self.log_prefix} Market Order Placed: {order}")
+                return order
 
         except Exception as e:
             print(f"{self.log_prefix} Error placing market order: {str(e)}")
@@ -311,7 +388,7 @@ class BloFin:
             current_position = unified_positions[0] if unified_positions else None
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
 
             #if size != 0:
             # Always scale as we need lot_size
@@ -475,6 +552,8 @@ async def main():
     # Start a time
     start_time = datetime.datetime.now()
     
+    from core.utils.execute_timed import execute_with_timeout
+    
     blofin = BloFin()
     
     # balance = await blofin.fetch_balance(instrument="USDT")      # Fetch futures balance
@@ -538,11 +617,56 @@ async def main():
     # Test total account value calculation
     print("\nTesting total account value calculation:")
     total_value = await blofin.fetch_initial_account_value()
-    print(f"{self.log_prefix} Final Total Account Value: {total_value} USDT")
+    print(f"{blofin.log_prefix} Final Total Account Value: {total_value} USDT")
+    
+    # Test fetching max order quantity
+    print(f"\n{blofin.log_prefix} Testing symbol details and max order quantity:")
+    try:
+        symbol = "BTC-USDT"
+        lot_size, min_size, tick_size, contract_value, max_size = await blofin.get_symbol_details(symbol)
+        print(f"{blofin.log_prefix} Symbol: {symbol}")
+        print(f"{blofin.log_prefix} Lot Size: {lot_size}")
+        print(f"{blofin.log_prefix} Min Size: {min_size}")
+        print(f"{blofin.log_prefix} Max Size: {max_size}")
+        print(f"{blofin.log_prefix} Tick Size: {tick_size}")
+        print(f"{blofin.log_prefix} Contract Value: {contract_value}")
+        
+        # Get full instrument details
+        instruments = await execute_with_timeout(
+            blofin.blofin_client.public.get_instruments,
+            timeout=5,
+            inst_type="SWAP"
+        )
+        for inst in instruments["data"]:
+            if inst["instId"] == symbol:
+                print(f"\n{blofin.log_prefix} Full instrument details for {symbol}:")
+                for key in ["maxSize", "minSize", "lotSize", "tickSize", "contractValue", "maxLeverage"]:
+                    if key in inst:
+                        print(f"{blofin.log_prefix} {key}: {inst[key]}")
+                break
+    except Exception as e:
+        print(f"{blofin.log_prefix} Error testing symbol details: {str(e)}")
+    
+    # Test order chunking demonstration (commented out to avoid actual trading)
+    """
+    print(f"\n{blofin.log_prefix} Testing order chunking with large order:")
+    try:
+        # This would test chunking if the order exceeds max_size
+        result = await blofin.open_market_position(
+            symbol="BTC-USDT",
+            side="buy",
+            size=1000,  # Large size to test chunking
+            leverage=5,
+            margin_mode="isolated"
+        )
+        print(f"{blofin.log_prefix} Order result: {result}")
+    except Exception as e:
+        print(f"{blofin.log_prefix} Error testing order chunking: {str(e)}")
+    """
     
     # End time
     end_time = datetime.datetime.now()
-    print(f"{self.log_prefix} Time taken: {end_time - start_time}")
+    print(f"{blofin.log_prefix} Time taken: {end_time - start_time}")
     
 if __name__ == "__main__":
     asyncio.run(main())

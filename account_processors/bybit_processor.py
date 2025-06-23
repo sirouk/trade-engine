@@ -205,7 +205,7 @@ class ByBit:
             print(f"{self.log_prefix} Error fetching tickers from Bybit: {str(e)}")
 
     async def get_symbol_details(self, symbol: str):
-        """Fetch instrument details including tick size, lot size, min size, and contract value."""
+        """Fetch instrument details including tick size, lot size, min size, max size, and contract value."""
         instruments = await execute_with_timeout(
             self.bybit_client.get_instruments_info,
             timeout=5,
@@ -218,10 +218,11 @@ class ByBit:
                 #print(f"Instrument: {instrument}")
                 lot_size = float(instrument["lotSizeFilter"]["qtyStep"])
                 min_size = float(instrument["lotSizeFilter"]["minOrderQty"])
+                max_size = float(instrument["lotSizeFilter"]["maxOrderQty"])
                 tick_size = float(instrument["priceFilter"]["tickSize"])
                 contract_value = float(lot_size / min_size)  # Optional fallback
 
-                return lot_size, min_size, tick_size, contract_value
+                return lot_size, min_size, tick_size, contract_value, max_size
         raise ValueError(f"Symbol {symbol} not found.")
 
     async def _place_limit_order_test(self,):
@@ -248,7 +249,7 @@ class ByBit:
             client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
             
             # Fetch and scale the size and price
             lots, price, _ = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
@@ -307,50 +308,179 @@ class ByBit:
         try:
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
             
-            client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-            lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
-            print(f"{self.log_prefix} Processing {lots} lots of {symbol} with a {side} order.")
-
-            if adjust_margin_mode:
-                bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
-                try:
-                    await execute_with_timeout(
-                        self.bybit_client.set_margin_mode,
-                        timeout=5,
-                        setMarginMode=bybit_margin_mode,
-                    )
-                except Exception as e:
-                    print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
-            
-            if adjust_leverage:
-                try:
-                    await execute_with_timeout(
-                        self.bybit_client.set_leverage,
-                        timeout=5,
-                        symbol=symbol, 
-                        category="linear", 
-                        buyLeverage=str(leverage), 
-                        sellLeverage=str(leverage),
-                    )
-                except Exception as e:
-                    print(f"{self.log_prefix} Leverage unchanged: {str(e)}")
-
-            order = await execute_with_timeout(
-                self.bybit_client.place_order,
+            # Get the specific market order max size from instrument info
+            instrument = await execute_with_timeout(
+                self.bybit_client.get_instruments_info,
                 timeout=5,
                 category="linear",
                 symbol=symbol,
-                side=side.capitalize(),
-                qty=lots,
-                order_type="Market",
-                isLeverage=1,
-                orderLinkId=client_oid,
-                positionIdx=0
             )
-            print(f"{self.log_prefix} Market Order Placed: {order}")
-            return order
+            max_market_order_qty = float(instrument["result"]["list"][0]["lotSizeFilter"].get("maxMktOrderQty", max_size))
+            
+            lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
+            print(f"{self.log_prefix} Processing {lots} lots of {symbol} with a {side} order.")
+            
+            # Check if order size exceeds maximum market order quantity
+            if lots > max_market_order_qty:
+                print(f"{self.log_prefix} Order size {lots} exceeds max market order qty {max_market_order_qty}. Splitting into chunks.")
+                
+                # Calculate number of full chunks and remainder
+                num_full_chunks = int(lots // max_market_order_qty)
+                remainder = lots % max_market_order_qty
+                
+                # Round remainder to lot size precision
+                decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
+                remainder = float(f"%.{decimal_places}f" % remainder)
+                
+                orders = []
+                total_executed = 0
+                
+                # Place full-sized chunks
+                for i in range(num_full_chunks):
+                    chunk_size = max_market_order_qty
+                    print(f"{self.log_prefix} Placing chunk {i+1}/{num_full_chunks + (1 if remainder > 0 else 0)}: {chunk_size} lots")
+                    
+                    client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    # Only adjust margin mode and leverage on first chunk
+                    if i == 0:
+                        if adjust_margin_mode:
+                            bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
+                            try:
+                                await execute_with_timeout(
+                                    self.bybit_client.set_margin_mode,
+                                    timeout=5,
+                                    setMarginMode=bybit_margin_mode,
+                                )
+                            except Exception as e:
+                                print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
+                        
+                        if adjust_leverage:
+                            try:
+                                await execute_with_timeout(
+                                    self.bybit_client.set_leverage,
+                                    timeout=5,
+                                    symbol=symbol, 
+                                    category="linear", 
+                                    buyLeverage=str(leverage), 
+                                    sellLeverage=str(leverage),
+                                )
+                            except Exception as e:
+                                print(f"{self.log_prefix} Leverage unchanged: {str(e)}")
+                    
+                    order = await execute_with_timeout(
+                        self.bybit_client.place_order,
+                        timeout=5,
+                        category="linear",
+                        symbol=symbol,
+                        side=side.capitalize(),
+                        qty=chunk_size,
+                        order_type="Market",
+                        isLeverage=1,
+                        orderLinkId=client_oid,
+                        positionIdx=0
+                    )
+                    orders.append(order)
+                    total_executed += chunk_size
+                    print(f"{self.log_prefix} Chunk order placed: {order}")
+                    
+                    # Small delay between orders to avoid rate limiting
+                    await asyncio.sleep(0.1)
+                
+                # Place remainder if exists
+                if remainder > 0:
+                    print(f"{self.log_prefix} Placing final chunk: {remainder} lots")
+                    client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                    
+                    # Only adjust settings if this is the first (and only) chunk
+                    if num_full_chunks == 0:
+                        if adjust_margin_mode:
+                            bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
+                            try:
+                                await execute_with_timeout(
+                                    self.bybit_client.set_margin_mode,
+                                    timeout=5,
+                                    setMarginMode=bybit_margin_mode,
+                                )
+                            except Exception as e:
+                                print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
+                        
+                        if adjust_leverage:
+                            try:
+                                await execute_with_timeout(
+                                    self.bybit_client.set_leverage,
+                                    timeout=5,
+                                    symbol=symbol, 
+                                    category="linear", 
+                                    buyLeverage=str(leverage), 
+                                    sellLeverage=str(leverage),
+                                )
+                            except Exception as e:
+                                print(f"{self.log_prefix} Leverage unchanged: {str(e)}")
+                    
+                    order = await execute_with_timeout(
+                        self.bybit_client.place_order,
+                        timeout=5,
+                        category="linear",
+                        symbol=symbol,
+                        side=side.capitalize(),
+                        qty=remainder,
+                        order_type="Market",
+                        isLeverage=1,
+                        orderLinkId=client_oid,
+                        positionIdx=0
+                    )
+                    orders.append(order)
+                    total_executed += remainder
+                    print(f"{self.log_prefix} Final chunk order placed: {order}")
+                
+                print(f"{self.log_prefix} Successfully executed {total_executed} lots across {len(orders)} orders")
+                return orders  # Return list of orders
+            
+            else:
+                # Order size is within limits, proceed normally
+                client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                
+                if adjust_margin_mode:
+                    bybit_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
+                    try:
+                        await execute_with_timeout(
+                            self.bybit_client.set_margin_mode,
+                            timeout=5,
+                            setMarginMode=bybit_margin_mode,
+                        )
+                    except Exception as e:
+                        print(f"{self.log_prefix} Margin Mode unchanged: {str(e)}")
+                
+                if adjust_leverage:
+                    try:
+                        await execute_with_timeout(
+                            self.bybit_client.set_leverage,
+                            timeout=5,
+                            symbol=symbol, 
+                            category="linear", 
+                            buyLeverage=str(leverage), 
+                            sellLeverage=str(leverage),
+                        )
+                    except Exception as e:
+                        print(f"{self.log_prefix} Leverage unchanged: {str(e)}")
+
+                order = await execute_with_timeout(
+                    self.bybit_client.place_order,
+                    timeout=5,
+                    category="linear",
+                    symbol=symbol,
+                    side=side.capitalize(),
+                    qty=lots,
+                    order_type="Market",
+                    isLeverage=1,
+                    orderLinkId=client_oid,
+                    positionIdx=0
+                )
+                print(f"{self.log_prefix} Market Order Placed: {order}")
+                return order
         except Exception as e:
             print(f"{self.log_prefix} Error placing market order: {str(e)}")
 
@@ -404,7 +534,7 @@ class ByBit:
             current_position = unified_positions[0] if unified_positions else None
             
             # Fetch symbol details (e.g., contract value, lot size, tick size)
-            lot_size, min_lots, tick_size, contract_value = await self.get_symbol_details(symbol)
+            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
 
             # Scale the target size to match exchange requirements
             #if size != 0:
@@ -553,6 +683,8 @@ async def main():
     # Start a time
     start_time = datetime.datetime.now()
     
+    from core.utils.execute_timed import execute_with_timeout
+    
     bybit = ByBit()
     
     # balance = await bybit.fetch_balance(instrument="USDT")      # Fetch futures balance
@@ -602,6 +734,62 @@ async def main():
     print(f"{bybit.log_prefix} Testing initial account value calculation:")
     initial_value = await bybit.fetch_initial_account_value()
     print(f"{bybit.log_prefix} Final Initial Account Value: {initial_value} USDT")
+    
+    # Test order chunking with a large TAO order (commented out to avoid actual trading)
+    # Uncomment the following to test order chunking:
+    """
+    print(f"\n{bybit.log_prefix} Testing order chunking with large TAO order:")
+    try:
+        # This would try to buy 150 TAO, which exceeds the 60 TAO market order limit
+        # It should automatically split into 3 orders: 60 + 60 + 30
+        result = await bybit.open_market_position(
+            symbol="TAOUSDT",
+            side="Buy",
+            size=150,  # This exceeds the 60 TAO market order limit
+            leverage=5,
+            margin_mode="isolated"
+        )
+        print(f"{bybit.log_prefix} Order result: {result}")
+    except Exception as e:
+        print(f"{bybit.log_prefix} Error testing order chunking: {str(e)}")
+    """
+    
+    # Test TAO/USDT symbol details to check max order quantity
+    print(f"\n{bybit.log_prefix} Testing TAO/USDT symbol details:")
+    try:
+        symbol = "TAOUSDT"
+        lot_size, min_size, tick_size, contract_value, max_size = await bybit.get_symbol_details(symbol)
+        print(f"{bybit.log_prefix} Symbol: {symbol}")
+        print(f"{bybit.log_prefix} Lot Size (qtyStep): {lot_size}")
+        print(f"{bybit.log_prefix} Min Order Qty: {min_size}")
+        print(f"{bybit.log_prefix} Max Order Qty: {max_size}")
+        print(f"{bybit.log_prefix} Tick Size: {tick_size}")
+        print(f"{bybit.log_prefix} Contract Value: {contract_value}")
+        
+        # Also get full instrument info for more details
+        instrument = await execute_with_timeout(
+            bybit.bybit_client.get_instruments_info,
+            timeout=5,
+            category="linear",
+            symbol=symbol,
+        )
+        print(f"\n{bybit.log_prefix} Full instrument details for {symbol}:")
+        for key, value in instrument["result"]["list"][0].items():
+            if "Filter" in key:
+                print(f"{bybit.log_prefix} {key}: {value}")
+    except Exception as e:
+        print(f"{bybit.log_prefix} Error testing TAO/USDT: {str(e)}")
+        # Try alternative symbols that might be for TAO
+        alternative_symbols = ["TAOUSUSDT", "TAO-USDT", "TAOPERP"]
+        print(f"{bybit.log_prefix} Trying alternative symbols...")
+        for alt_symbol in alternative_symbols:
+            try:
+                lot_size, min_size, tick_size, contract_value, max_size = await bybit.get_symbol_details(alt_symbol)
+                print(f"{bybit.log_prefix} Found working symbol: {alt_symbol}")
+                print(f"{bybit.log_prefix} Max Order Qty: {max_size}")
+                break
+            except:
+                continue
     
     # End time
     end_time = datetime.datetime.now()
