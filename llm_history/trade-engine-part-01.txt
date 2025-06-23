@@ -29666,7 +29666,7 @@ ChatGPT said:
 ChatGPT
 Let’s create a prompt-driven script that will guide the user through entering information for TradingView and BitTensor signal subscriptions and global leverage settings for each asset. This script will validate the inputs, ensuring that weight allocations don’t exceed the budget and that leverage settings are specified globally for each asset. Here’s how the script could look:
 
-import json
+import ujson
 from typing import Optional
 from dataclasses import asdict
 from core.signal_config import GlobalSignalConfig, TradingViewAlert, BitTensorAsset, SignalSourceConfig  # Adjust import paths as needed
@@ -29840,7 +29840,7 @@ Execute Trade:
 Send the trade request to the exchange using the pre-built reconcile functions, passing the calculated quantity and leverage.
 Here’s how to set up this processing section in Python:
 
-import json
+import ujson
 from core.signal_config import GlobalSignalConfig  # Adjust import path as needed
 from core.exchange import ExchangeClient  # Assuming ExchangeClient handles interaction with the exchange API
 from core.utils.math import calculate_quantity_based_on_allocation
@@ -31742,7 +31742,7 @@ Signals will be saved to disk, and the latest entries for each asset will be pro
 3. Script Implementation
 TradingView Processing Script
 import os
-import json
+import ujson
 from datetime import datetime, timedelta
 
 RAW_SIGNALS_DIR = "raw_signals/tradingview"
@@ -32230,7 +32230,7 @@ After weight allocation, prompt for leverage settings for each unique asset.
 Here’s the full configuration script:
 
 import os
-import json
+import ujson
 from typing import Dict, List
 from datetime import datetime
 from core.dataclasses import ConfigData, SignalWeightConfig, LeverageConfig  # Assuming dataclasses are saved here
@@ -32903,7 +32903,7 @@ This script uses simple data classes to manage the weight and leverage settings 
 Here’s the script:
 
 import os
-import json
+import ujson
 from datetime import datetime
 from signal_processors.tradingview_processor import fetch_tradingview_signals
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33019,7 +33019,7 @@ ChatGPT
 Here’s the updated signal_weight_config.py script with modifications to iterate through all detected signal sources and assets without requiring the full allocation of 1.0. The script now allows the user to specify weights for each signal, but the total doesn’t need to reach exactly 1.0; they can allocate any portion they prefer and leave some weight unassigned.
 
 import os
-import json
+import ujson
 import asyncio
 from signal_processors.tradingview_processor import fetch_tradingview_signals
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33371,7 +33371,7 @@ Allow an empty answer to skip any prompt.
 Here's how the updated signal_weight_config.py could look:
 
 import os
-import json
+import ujson
 from core.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING
 from core.bittensor_processor import process_bittensor_signals
 from collections import defaultdict
@@ -33472,7 +33472,7 @@ Ok, please remember, we had the dataclasses at the top of the file!
 This is what we had, so please start here and modify it:
 
 import os
-import json
+import ujson
 import asyncio
 from signal_processors.tradingview_processor import fetch_tradingview_signals
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33577,7 +33577,7 @@ ChatGPT
 Here’s the modified signal_weight_config.py script that includes your dataclasses at the top, incorporates CORE_ASSET_MAPPING for symbol filtering, and refines the prompts to clearly show the source and original asset name with an option to skip by pressing Enter.
 
 import os
-import json
+import ujson
 import asyncio
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33732,7 +33732,7 @@ ChatGPT
 Here’s an updated version of signal_weight_config.py incorporating a new SignalWeightSource class, which centralizes signal source management. This design minimizes future modifications by only requiring updates in load_recent_signals() when new signal sources are added. Each signal processor script maintains its own CORE_ASSET_MAPPING.
 
 import os
-import json
+import ujson
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING as TRADINGVIEW_ASSET_MAPPING
@@ -33897,7 +33897,7 @@ ChatGPT
 If both bittensor and tradingview scripts are already normalizing their assets, we can simplify by removing get_normalized_signals() and directly using the normalized symbols in load_recent_signals() without additional mapping in SignalWeightSource. Here’s an updated version:
 
 import os
-import json
+import ujson
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals
@@ -34054,7 +34054,7 @@ I want to return "BTCUSD" etc. in for the original_symbol:
 
 
 import os 
-import json
+import ujson
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING as TRADINGVIEW_ASSET_MAPPING
@@ -34244,7 +34244,7 @@ We need to make sure that the budget of 1.0 is the total global budget and not t
 
 
 import os
-import json
+import ujson
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING as TRADINGVIEW_ASSET_MAPPING
@@ -35497,7 +35497,7 @@ Python Code Implementation
 Here’s a sample function to rank the miners using these criteria:
 
 from datetime import datetime
-import json
+import ujson
 
 # Load the JSON data
 with open('/mnt/data/bittensor_signal_2024-11-05_example_top_10.json') as file:

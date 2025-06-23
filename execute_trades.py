@@ -1,4 +1,4 @@
-import json
+import ujson
 import time
 from typing import Dict, List, Tuple
 import logging
@@ -9,11 +9,14 @@ import os
 
 from signal_processors.tradingview_processor import TradingViewProcessor
 from signal_processors.bittensor_processor import BittensorProcessor
+
 from account_processors.bybit_processor import ByBit
 from account_processors.blofin_processor import BloFin
 from account_processors.kucoin_processor import KuCoin
 from account_processors.mexc_processor import MEXC
+
 from core.signal_manager import SignalManager
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,7 +118,7 @@ class TradeExecutor:
     async def process_account(self, account, signals: Dict):
         """Process signals for a specific account."""
         try:
-            # Update weight configg by calling the _load_weight_config
+            # Update weight config by calling the _load_weight_config
             self._load_weight_config()
             
             # Skip disabled accounts but still process with zero depths
@@ -253,97 +256,7 @@ class TradeExecutor:
             logger.error(f"Error in execute: {str(e)}")
             return False
 
-async def calculate_trade_amounts(accounts, signals):
-    """Calculate trade amounts based on account values and signal weights."""
-    try:
-        # Get total account values using new methods
-        account_values = {}
-        for account in accounts:
-            total_value = await account.fetch_initial_account_value()
-            account_values[account.exchange_name] = total_value
-            
-        print("\nAccount Values:")
-        for exchange, value in account_values.items():
-            print(f"{exchange}: {value:.2f} USDT")
-            
-        # Calculate aggregate depths and leverages by asset
-        asset_depths = defaultdict(float)
-        asset_leverages = defaultdict(list)
-        
-        for signal in signals:
-            symbol = signal.symbol
-            base_asset = symbol.replace("USDT", "")
-            depth = signal.weight * 100  # Convert weight to percentage
-            leverage = signal.leverage
-            
-            asset_depths[base_asset] += depth
-            if leverage not in asset_leverages[base_asset]:
-                asset_leverages[base_asset].append(leverage)
-                
-        # Print summary of depths and leverages
-        print("\nExpected Position Summary:")
-        for asset, depth in asset_depths.items():
-            print(f"\n{asset}:")
-            print(f"  Total Depth: {depth:.1f}%")
-            print(f"  Leverage(s): {asset_leverages[asset]}")
 
-        # Calculate trade amounts for each account and signal
-        trade_amounts = {}
-        for account in accounts:
-            exchange_value = account_values[account.exchange_name]
-            signal_amounts = {}
-            
-            for signal in signals:
-                # Calculate amount based on account value and signal weight
-                amount = exchange_value * signal.weight
-                signal_amounts[signal.symbol] = amount
-                
-            trade_amounts[account.exchange_name] = signal_amounts
-            
-        return trade_amounts
-        
-    except Exception as e:
-        print(f"Error calculating trade amounts: {str(e)}")
-        return None
-
-async def execute_trades(accounts, signals):
-    """Execute trades across all accounts based on signals."""
-    try:
-        # Calculate trade amounts
-        trade_amounts = await calculate_trade_amounts(accounts, signals)
-        if not trade_amounts:
-            return False
-            
-        print("\nTrade Execution Plan:")
-        for exchange, amounts in trade_amounts.items():
-            print(f"\n{exchange}:")
-            for symbol, amount in amounts.items():
-                print(f"  {symbol}: {amount:.2f} USDT")
-        
-        # Execute trades for each account
-        for account in accounts:
-            exchange_amounts = trade_amounts[account.exchange_name]
-            
-            for signal in signals:
-                amount = exchange_amounts[signal.symbol]
-                
-                try:
-                    # Reconcile position with calculated amount
-                    await account.reconcile_position(
-                        symbol=signal.symbol,
-                        size=signal.size,
-                        leverage=signal.leverage,
-                        margin_mode=signal.margin_mode
-                    )
-                except Exception as e:
-                    print(f"Error executing trade on {account.exchange_name} for {signal.symbol}: {str(e)}")
-                    continue
-                    
-        return True
-        
-    except Exception as e:
-        print(f"Error executing trades: {str(e)}")
-        return False
 
 async def main():
     executor = TradeExecutor()

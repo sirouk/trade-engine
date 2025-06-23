@@ -6,7 +6,7 @@ import datetime
 import subprocess
 from pathlib import Path
 import sys
-import json
+import ujson
 from signal_processors.tradingview_processor import TradingViewProcessor
 
 
