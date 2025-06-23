@@ -1,4 +1,4 @@
-import ujson
+import ujson as json
 import time
 from typing import Dict, List, Tuple
 import logging

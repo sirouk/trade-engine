@@ -156,7 +156,7 @@ class RaceConditionTester:
                             
                             # Simple parsing for direction and symbol
                             if '"direction":' in json_str and '"symbol":' in json_str:
-                                import ujson
+                                import ujson as json
                                 data = json.loads(json_str)
                                 signals_in_file.append({
                                     'timestamp': timestamp,

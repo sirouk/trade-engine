@@ -40,7 +40,7 @@ class Credentials:
     mexc: MEXCCredentials
 
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "credentials.json"
@@ -58,7 +58,7 @@ def load_credentials(file_path: str) -> Credentials:
         )
 
     with open(file_path, 'r', encoding='utf-8') as f:
-        data = ujson.load(f)
+        data = json.load(f)
         #print(f"Raw data loaded from {file_path}: {data}")  # Debug print
 
     bittensor_creds = data.get('bittensor_sn8', {})
@@ -114,7 +114,7 @@ def save_credentials(credentials: Credentials, file_path: str):
         'mexc': credentials.mexc.__dict__ if credentials.mexc else None,
     }
     with open(file_path, 'w', encoding='utf-8') as f:
-        ujson.dump(data, f, indent=4)
+        json.dump(data, f, indent=4)
 
 def prompt_for_changes(credentials_name: str, skip_prompt: bool = False) -> bool:
     """Ask the user if they want to change the credentials."""

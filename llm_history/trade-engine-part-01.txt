@@ -576,7 +576,7 @@ Use ujson for faster JSON processing.
 Store credentials in credentials.json.
 Handle first-run behavior to create credentials if not present.
 import aiohttp
-import ujson
+import ujson as json
 import os
 import asyncio
 
@@ -658,7 +658,7 @@ Memory updated
 Here’s the updated version of the bittensor_processor.py file, where the main loop is renamed to fetch_bittensor_signal(), and the credentials storage is handled in a way that is explicit for the signal processor script:
 
 import aiohttp
-import ujson
+import ujson as json
 import os
 import asyncio
 
@@ -874,7 +874,7 @@ class Credentials:
 2. Credential Management Functions
 Now, we’ll separate out the methods for loading, saving, and prompting for credentials:
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -1105,7 +1105,7 @@ packages = ["signal_processors", "core"]
 [project.scripts]
 trade-engine = "signal_processors.bittensor_processor:fetch_bittensor_signal"
 Updated credentials.py in core/
-import ujson
+import ujson as json
 import os
 from core.bittensor_signals import BittensorCredentials
 from dataclasses import dataclass
@@ -1583,7 +1583,7 @@ The error message says that None is being returned, but the function is expected
 
 Fix:
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -1642,7 +1642,7 @@ This is the updated file, but I would like to be able to run it directly and hav
 
 
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -1669,7 +1669,7 @@ Here’s the updated file with the necessary modifications:
 
 Updated signal_processors/credentials.py
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -1812,7 +1812,7 @@ class Credentials:
 Here's the updated file:
 
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -1925,7 +1925,7 @@ Let’s rebuild the signal_processors/bittensor_processor.py file with a clean s
 signal_processors/bittensor_processor.py
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from core.credentials import load_credentials, save_credentials, ensure_bittensor_credentials, Credentials
 
@@ -2009,7 +2009,7 @@ Thanks for the clarification! Let's update the code to reflect that the dataclas
 Updated signal_processors/bittensor_processor.py
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from core.credentials import Credentials, BittensorCredentials  # Import dataclass
 from signal_processors.credentials import load_credentials, save_credentials, ensure_bittensor_credentials  # Import functions
@@ -2119,7 +2119,7 @@ Here’s how you can modify your script to store the fetched data:
 Updated signal_processors/bittensor_processor.py
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import Credentials, BittensorCredentials
@@ -2209,7 +2209,7 @@ Here's the updated file without any problems like vars that are set and immediat
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import Credentials, BittensorCredentials
@@ -2298,7 +2298,7 @@ Here's the latest file. I need to move BITTENSOR_URL to the credentials file and
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import Credentials, BittensorCredentials
@@ -2391,7 +2391,7 @@ class Credentials:
 2. Update signal_processors/credentials.py
 Now update the ensure_bittensor_credentials function to prompt the user for the API key and the endpoint if they are missing.
 
-import ujson
+import ujson as json
 import os
 from core.credentials import Credentials, BittensorCredentials
 
@@ -2434,7 +2434,7 @@ Now, modify the bittensor_processor.py file to use the endpoint from the credent
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import Credentials, BittensorCredentials
@@ -2522,7 +2522,7 @@ This is what we have now, please do not change much, only what is needed to grab
 
 
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -2585,7 +2585,7 @@ Update the prompt to request the endpoint from the user if it's missing.
 Ensure that the endpoint is saved and loaded along with the API key.
 Updated Code:
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -2677,7 +2677,7 @@ TypeError: BittensorCredentials.__init__() missing 1 required positional argumen
 The code now:
 
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -2743,7 +2743,7 @@ Here’s the modified code to handle missing endpoint values in the existing cre
 
 Updated Code
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -2828,7 +2828,7 @@ Here's the updated code:
 
 Updated Code with Change Option
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -2921,7 +2921,7 @@ now let's update this accordingly now that we store the endpoint in the credenti
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import Credentials, BittensorCredentials
@@ -3000,7 +3000,7 @@ Here’s the updated code:
 Updated bittensor_processor.py
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import Credentials, BittensorCredentials
@@ -3086,7 +3086,7 @@ You said:
 I updated the credentials.py to allow the skipping of credentials prompt change:
 
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -3169,7 +3169,7 @@ I also updated the bittensor_processor.py to use it:
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import Credentials, BittensorCredentials
@@ -3654,7 +3654,7 @@ Here's how you can adjust your code to correctly handle the miner hotkey as a ke
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.bittensor_signals import BTTSN8TradePair, BTTSN8Order, BTTSN8Position, BTTSN8MinerSignal
@@ -3819,7 +3819,7 @@ the code:
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from signal_processors.credentials import load_credentials, save_credentials, ensure_bittensor_credentials
@@ -4060,7 +4060,7 @@ Directory Structure:
     └── bybit_processor.py
 account_processors/credentials.py
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "account_processors/bybit_credentials.json"
@@ -4175,7 +4175,7 @@ For the credentials.py please take an approach just like this one:
 
 
 from core.credentials import Credentials, BittensorCredentials
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "signal_processors/credentials.json"
@@ -4257,7 +4257,7 @@ Memory updated
 Here’s the updated credentials.py for Bybit that follows the same structure as the Bittensor example you provided:
 
 from dataclasses import dataclass
-import ujson
+import ujson as json
 import os
 
 @dataclass
@@ -4370,7 +4370,7 @@ Memory updated
 Here’s the updated credentials.py that unifies Bybit credentials into the same credentials.json file alongside Bittensor credentials:
 
 from dataclasses import dataclass
-import ujson
+import ujson as json
 import os
 
 @dataclass
@@ -4515,7 +4515,7 @@ Here's the updated file. Change it so the prompt_for_change() references which c
 
 
 from dataclasses import dataclass
-import ujson
+import ujson as json
 import os
 from core.credentials import Credentials, BittensorCredentials, BybitCredentials
 
@@ -4624,7 +4624,7 @@ ChatGPT
 Here’s the updated version of the file with the prompt_for_changes() function modified to specify which credentials it's asking about:
 
 from dataclasses import dataclass
-import ujson
+import ujson as json
 import os
 from core.credentials import Credentials, BittensorCredentials, BybitCredentials
 
@@ -4794,7 +4794,7 @@ ModuleNotFoundError: No module named 'configuration'
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from configuration.credentials import load_credentials, ensure_bittensor_credentials
@@ -5000,7 +5000,7 @@ This should align with your current directory structure.
 Updated bittensor_processor.py:
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_credentials, ensure_bittensor_credentials  # Fixed import path
@@ -5094,7 +5094,7 @@ class Credentials:
     bybit: BybitCredentials
 
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "credentials.json"
@@ -5567,7 +5567,7 @@ class Credentials:
     bybit: BybitCredentials
 
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "credentials.json"
@@ -5714,7 +5714,7 @@ class Credentials:
     blofin: BloFinCredentials
 
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "credentials.json"
@@ -11436,7 +11436,7 @@ class Credentials:
     kucoin: KuCoinCredentials
 
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "credentials.json"
@@ -11664,7 +11664,7 @@ class Credentials:
     kucoin: KuCoinCredentials
     mexc: MEXCCredentials
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "credentials.json"
@@ -29666,7 +29666,7 @@ ChatGPT said:
 ChatGPT
 Let’s create a prompt-driven script that will guide the user through entering information for TradingView and BitTensor signal subscriptions and global leverage settings for each asset. This script will validate the inputs, ensuring that weight allocations don’t exceed the budget and that leverage settings are specified globally for each asset. Here’s how the script could look:
 
-import ujson
+import ujson as json
 from typing import Optional
 from dataclasses import asdict
 from core.signal_config import GlobalSignalConfig, TradingViewAlert, BitTensorAsset, SignalSourceConfig  # Adjust import paths as needed
@@ -29840,7 +29840,7 @@ Execute Trade:
 Send the trade request to the exchange using the pre-built reconcile functions, passing the calculated quantity and leverage.
 Here’s how to set up this processing section in Python:
 
-import ujson
+import ujson as json
 from core.signal_config import GlobalSignalConfig  # Adjust import path as needed
 from core.exchange import ExchangeClient  # Assuming ExchangeClient handles interaction with the exchange API
 from core.utils.math import calculate_quantity_based_on_allocation
@@ -31298,7 +31298,7 @@ class Credentials:
     mexc: MEXCCredentials
 
 
-import ujson
+import ujson as json
 import os
 
 CREDENTIALS_FILE = "credentials.json"
@@ -31590,7 +31590,7 @@ For Bittensor, the miners to select and assets they're trading can be fetched li
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_bittensor_credentials
@@ -31742,7 +31742,7 @@ Signals will be saved to disk, and the latest entries for each asset will be pro
 3. Script Implementation
 TradingView Processing Script
 import os
-import ujson
+import ujson as json
 from datetime import datetime, timedelta
 
 RAW_SIGNALS_DIR = "raw_signals/tradingview"
@@ -32230,7 +32230,7 @@ After weight allocation, prompt for leverage settings for each unique asset.
 Here’s the full configuration script:
 
 import os
-import ujson
+import ujson as json
 from typing import Dict, List
 from datetime import datetime
 from core.dataclasses import ConfigData, SignalWeightConfig, LeverageConfig  # Assuming dataclasses are saved here
@@ -32352,7 +32352,7 @@ This is the bittensor signal processor script:
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_bittensor_credentials
@@ -32507,7 +32507,7 @@ Here’s the modified script:
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_bittensor_credentials
@@ -32605,7 +32605,7 @@ Please see the script the way it is now. Take into consideration the use of data
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_bittensor_credentials
@@ -32755,7 +32755,7 @@ Here’s the modified script:
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_bittensor_credentials
@@ -32903,7 +32903,7 @@ This script uses simple data classes to manage the weight and leverage settings 
 Here’s the script:
 
 import os
-import ujson
+import ujson as json
 from datetime import datetime
 from signal_processors.tradingview_processor import fetch_tradingview_signals
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33019,7 +33019,7 @@ ChatGPT
 Here’s the updated signal_weight_config.py script with modifications to iterate through all detected signal sources and assets without requiring the full allocation of 1.0. The script now allows the user to specify weights for each signal, but the total doesn’t need to reach exactly 1.0; they can allocate any portion they prefer and leave some weight unassigned.
 
 import os
-import ujson
+import ujson as json
 import asyncio
 from signal_processors.tradingview_processor import fetch_tradingview_signals
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33371,7 +33371,7 @@ Allow an empty answer to skip any prompt.
 Here's how the updated signal_weight_config.py could look:
 
 import os
-import ujson
+import ujson as json
 from core.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING
 from core.bittensor_processor import process_bittensor_signals
 from collections import defaultdict
@@ -33472,7 +33472,7 @@ Ok, please remember, we had the dataclasses at the top of the file!
 This is what we had, so please start here and modify it:
 
 import os
-import ujson
+import ujson as json
 import asyncio
 from signal_processors.tradingview_processor import fetch_tradingview_signals
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33577,7 +33577,7 @@ ChatGPT
 Here’s the modified signal_weight_config.py script that includes your dataclasses at the top, incorporates CORE_ASSET_MAPPING for symbol filtering, and refines the prompts to clearly show the source and original asset name with an option to skip by pressing Enter.
 
 import os
-import ujson
+import ujson as json
 import asyncio
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING
 from signal_processors.bittensor_processor import fetch_bittensor_signal
@@ -33732,7 +33732,7 @@ ChatGPT
 Here’s an updated version of signal_weight_config.py incorporating a new SignalWeightSource class, which centralizes signal source management. This design minimizes future modifications by only requiring updates in load_recent_signals() when new signal sources are added. Each signal processor script maintains its own CORE_ASSET_MAPPING.
 
 import os
-import ujson
+import ujson as json
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING as TRADINGVIEW_ASSET_MAPPING
@@ -33897,7 +33897,7 @@ ChatGPT
 If both bittensor and tradingview scripts are already normalizing their assets, we can simplify by removing get_normalized_signals() and directly using the normalized symbols in load_recent_signals() without additional mapping in SignalWeightSource. Here’s an updated version:
 
 import os
-import ujson
+import ujson as json
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals
@@ -34054,7 +34054,7 @@ I want to return "BTCUSD" etc. in for the original_symbol:
 
 
 import os 
-import ujson
+import ujson as json
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING as TRADINGVIEW_ASSET_MAPPING
@@ -34244,7 +34244,7 @@ We need to make sure that the budget of 1.0 is the total global budget and not t
 
 
 import os
-import ujson
+import ujson as json
 import asyncio
 from dataclasses import dataclass, asdict
 from signal_processors.tradingview_processor import fetch_tradingview_signals, CORE_ASSET_MAPPING as TRADINGVIEW_ASSET_MAPPING
@@ -34508,7 +34508,7 @@ Please keep in mind that leverage is really the position size for Bittensor.
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_bittensor_credentials
@@ -34876,7 +34876,7 @@ Here's the code as is now:
 
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 from datetime import datetime
 from core.credentials import load_bittensor_credentials
@@ -35430,7 +35430,7 @@ Analysis errored
 Always show details
 
 import zipfile
-import ujson
+import ujson as json
 
 # Unzip and load the contents of the provided file to inspect data structure
 file_path = '/mnt/data/bittensor_signal_2024-11-05_20-23-09.zip'
@@ -35497,7 +35497,7 @@ Python Code Implementation
 Here’s a sample function to rank the miners using these criteria:
 
 from datetime import datetime
-import ujson
+import ujson as json
 
 # Load the JSON data
 with open('/mnt/data/bittensor_signal_2024-11-05_example_top_10.json') as file:

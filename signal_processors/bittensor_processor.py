@@ -1,6 +1,6 @@
 import asyncio
 import aiohttp
-import ujson
+import ujson as json
 import os
 import argparse
 from datetime import datetime, timedelta, UTC
@@ -9,7 +9,6 @@ import zipfile
 import numpy as np
 from math import sqrt
 import logging
-import ujson as json
 
 # Configure logging with a more robust setup
 logger = logging.getLogger(__name__)
@@ -299,7 +298,7 @@ class BittensorProcessor:
             file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    signals = ujson.load(f)
+                    signals = json.load(f)
                     
                 # Update latest signals based on timestamp
                 for asset, signal in signals.items():
@@ -368,7 +367,7 @@ class BittensorProcessor:
                     timeout=3  # 3 second timeout
                 ) as response:
                     if response.status == 200:
-                        return await response.json(loads=ujson.loads)
+                        return await response.json(loads=json.loads)
                     logger.error(f"Failed to fetch data: {response.status}")
                     return None
         except asyncio.TimeoutError:
@@ -398,7 +397,7 @@ class BittensorProcessor:
         
         # Write to temporary file first
         with open(temp_path, 'w', encoding='utf-8') as f:
-            ujson.dump(data, f, indent=4)
+            json.dump(data, f, indent=4)
             
         # Atomic rename operation
         os.replace(temp_path, final_path)
@@ -1008,7 +1007,7 @@ class BittensorProcessor:
             file_path = os.path.join(self.RAW_SIGNALS_DIR, filename)
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    signals = ujson.load(f)
+                    signals = json.load(f)
                     if asset in signals:
                         return signals[asset]
             except (json.JSONDecodeError, KeyError):
