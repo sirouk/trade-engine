@@ -52,8 +52,8 @@ class SignalManager:
         try:
             with open(self.CACHE_FILE, 'w') as f:
                 json.dump(self.account_asset_depths, f, indent=4)
-            # Force sync to filesystem
-            os.fsync(f.fileno())
+                # Force sync to filesystem
+                os.fsync(f.fileno())
         except Exception as e:
             logger.error(f"Error saving cache: {str(e)}")
     

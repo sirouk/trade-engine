@@ -178,7 +178,7 @@ class TradeExecutor:
 
                 # Get symbol details to log the precision/lot requirements
                 symbol_details = await account.get_symbol_details(exchange_symbol)
-                lot_size, min_size, tick_size, contract_value = symbol_details  # Unpack the tuple
+                lot_size, min_size, tick_size, contract_value, max_size = symbol_details  # Unpack the tuple
                 
                 logger.info(f"{exchange_symbol}: depth={depth}, "
                           f"position_value={position_value}, raw_quantity={quantity}")
@@ -186,7 +186,8 @@ class TradeExecutor:
                           f"Lot Size: {lot_size}, "
                           f"Min Size: {min_size}, "
                           f"Tick Size: {tick_size}, "
-                          f"Contract Value: {contract_value}")
+                          f"Contract Value: {contract_value}, "
+                          f"Max Size: {max_size}")
 
                 # Let reconcile_position handle the quantity precision
                 await account.reconcile_position(
@@ -241,7 +242,7 @@ class TradeExecutor:
                     
                 success, error = result
                 if success:
-                    self.signal_manager.confirm_execution(account.exchange_name, True)
+                    await self.signal_manager.confirm_execution(account.exchange_name, True)
                 else:
                     logger.error(f"Error processing {account.exchange_name}: {error}")
                     all_successful = False
