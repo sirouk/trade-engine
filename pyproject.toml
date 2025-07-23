@@ -42,6 +42,7 @@ dependencies = [
     "uvicorn",
     "urllib3",
     "pyopenssl",
+    "ccxt[async]",
 ]
 
 

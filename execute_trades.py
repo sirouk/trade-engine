@@ -14,8 +14,10 @@ from account_processors.bybit_processor import ByBit
 from account_processors.blofin_processor import BloFin
 from account_processors.kucoin_processor import KuCoin
 from account_processors.mexc_processor import MEXC
+from account_processors.ccxt_processor import CCXTProcessor
 
 from core.signal_manager import SignalManager
+from config.credentials import load_ccxt_credentials
 
 
 logging.basicConfig(
@@ -72,6 +74,19 @@ class TradeExecutor:
             KuCoin(),
             MEXC()
         ]
+        
+        # Add CCXT exchanges if configured
+        try:
+            ccxt_credentials = load_ccxt_credentials()
+            if ccxt_credentials.ccxt_list:
+                for ccxt_cred in ccxt_credentials.ccxt_list:
+                    if ccxt_cred.enabled:
+                        ccxt_processor = CCXTProcessor(ccxt_credentials=ccxt_cred)
+                        self.accounts.append(ccxt_processor)
+                        logger.info(f"Added CCXT exchange: {ccxt_cred.exchange_name}")
+        except ValueError as e:
+            # No CCXT exchanges configured
+            logger.info("No CCXT exchanges configured")
 
     def _should_reload_asset_mapping(self) -> bool:
         """Check if we should reload asset mapping configuration."""

@@ -137,14 +137,22 @@ class ByBit:
             positions = response.get("result", {}).get("list", [])
             #print(positions)
             
-            # Determine margin mode if tradeMode is ambiguous
-            margin_mode = None
-            if fetch_margin_mode and positions and positions[0].get("tradeMode") == 0 and float(positions[0].get("size")) != 0:
-                print(f"{self.log_prefix} Unified Account where trade mode is ambiguous, or we are really cross margin. Fetching account margin mode to be sure.")
-                margin_mode = await self.get_account_margin_mode()
+            # For UTA accounts, tradeMode 0 means "follow account default"
+            # We need to fetch the account margin mode to determine the actual mode
+            account_margin_mode = None
+            for pos in positions:
+                if float(pos.get("size", 0)) > 0 and pos.get("tradeMode") == 0:
+                    # Only fetch once if we have positions with tradeMode 0
+                    if account_margin_mode is None:
+                        try:
+                            account_margin_mode = await self.get_account_margin_mode()
+                            print(f"{self.log_prefix} Account margin mode for tradeMode 0: {account_margin_mode}")
+                        except Exception as e:
+                            print(f"{self.log_prefix} Could not fetch account margin mode: {e}")
+                    break
 
             unified_positions = [
-                self.map_bybit_position_to_unified(pos, margin_mode)
+                self.map_bybit_position_to_unified(pos, account_margin_mode)
                 for pos in positions
                 if float(pos.get("size", 0)) > 0
             ]
@@ -157,7 +165,7 @@ class ByBit:
             print(f"{self.log_prefix} Error mapping Bybit positions: {str(e)}")
             return []
     
-    def map_bybit_position_to_unified(self, position: dict, margin_mode: str = None) -> UnifiedPosition:
+    def map_bybit_position_to_unified(self, position: dict, account_margin_mode: str = None) -> UnifiedPosition:
         """Convert a Bybit position response into a UnifiedPosition object."""
         size = abs(float(position.get("size", 0)))
         direction = "long" if position.get("side", "").lower() == "buy" else "short"
@@ -165,10 +173,19 @@ class ByBit:
         if direction == "short":
             size = -size
 
-        # Use provided margin mode if available, otherwise derive from tradeMode
-        margin_mode = margin_mode or ("isolated" if position.get("tradeMode") == 1 else "cross")
+        # Determine margin mode
+        trade_mode = position.get("tradeMode")
+        if trade_mode == 1:
+            # Explicitly isolated
+            margin_mode = "isolated"
+        elif trade_mode == 0 and account_margin_mode:
+            # Use account default margin mode
+            margin_mode = account_margin_mode
+        else:
+            # Fallback - assume isolated for safety
+            margin_mode = "isolated"
         
-        # User inverse mapping to convert margin mode to unified format
+        # Convert to unified format using inverse mapping
         margin_mode = self.inverse_margin_mode_map.get(margin_mode, margin_mode)
 
         return UnifiedPosition(
