@@ -37,3 +37,4 @@ raw_signals/*/archive/*.zip
 asset_mapping_config.json
 
 bittensor_processor_config.json
+execute_trades_backup_*.py
