@@ -237,14 +237,10 @@ class TradeExecutor:
         - Disabled account handling
         - Error handling per symbol
         - Cache confirmation
-        - Weight config reloading
         """
         account_start_time = time.time()
         
         try:
-            # Update weight config by calling the _load_weight_config
-            self._load_weight_config()
-            
             # Skip disabled accounts but still process with zero depths IN PARALLEL
             if not account.enabled:
                 logger.info(f"Skipping disabled account: {account.exchange_name}")
@@ -326,6 +322,9 @@ class TradeExecutor:
         cycle_start_time = time.time()
         
         try:
+            # Load weight config ONCE before processing accounts (prevents race condition)
+            self._load_weight_config()
+            
             updates = self.signal_manager.check_for_updates(self.accounts)
             #logger.info(f"Checking for updates: {updates}")
             
@@ -350,7 +349,7 @@ class TradeExecutor:
             # Wait for all account processing to complete
             results: List[Tuple[bool, str]] = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Process results and confirm executions
+            # Process results
             all_successful = True
             for account, result in zip(self.accounts, results):
                 if isinstance(result, Exception):
@@ -359,11 +358,10 @@ class TradeExecutor:
                     continue
                     
                 success, error = result
-                if success:
-                    await self.signal_manager.confirm_execution(account.exchange_name, True)
-                else:
+                if not success:
                     logger.error(f"Error processing {account.exchange_name}: {error}")
                     all_successful = False
+                # Note: Cache confirmation already done in process_account() line 306
             
             # Log cycle timing
             cycle_duration = time.time() - cycle_start_time
