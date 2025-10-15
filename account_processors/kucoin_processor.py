@@ -11,7 +11,7 @@ from core.utils.execute_timed import execute_with_timeout
 class KuCoin:
     def __init__(self):
         self.exchange_name = "KuCoin"
-        self.enabled = True
+        self.enabled = False
         self.leverage_tolerance = 0.10
         
         # Load KuCoin Futures API credentials from the credentials file
