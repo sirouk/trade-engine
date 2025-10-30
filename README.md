@@ -95,6 +95,29 @@ You'll be prompted for the following credentials:
   Enter your MEXC API secret: <your-api-secret>
   ```
 
+## Enabling and Disabling Exchange Accounts
+
+Each exchange account has an `enabled` flag in its processor that controls whether it participates in trading:
+
+- **Enabled accounts (`enabled=True`)**: Fully active - receive signals, calculate positions, and execute trades
+- **Disabled accounts (`enabled=False`)**: Suspended - only process if they have open positions that need to be closed
+
+To disable an account, edit the corresponding processor file:
+
+```python
+# In account_processors/kucoin_processor.py or account_processors/mexc_processor.py
+def __init__(self):
+    self.exchange_name = "KuCoin"
+    self.enabled = False  # Change to False to disable
+```
+
+**Behavior when disabling:**
+- The system checks `account_asset_depths.json` to see if the disabled account has any non-zero positions
+- If all positions are 0: Account is completely skipped (no API calls, no log entries)
+- If any positions are > 0: Account is processed to close those positions, then skipped in future cycles
+
+This optimization prevents unnecessary API calls and log spam while ensuring positions are properly managed when suspending an account.
+
 ## Configuring Asset Mappings
 
 The trade engine needs to know how to map asset symbols from different signal sources to a unified format. For example, Bittensor might use "BTCUSD" while TradingView uses "BTCUSDT" for the same asset. Run the asset mapping configuration script:
@@ -541,5 +564,7 @@ Signal Sources                Signal Processing                Position Manageme
 - **Semaphore Limits:** Each account creates its own semaphore (10 concurrent symbols). Adjust `MAX_CONCURRENT_SYMBOL_REQUESTS` if hitting rate limits.
 
 - **Cache Confirmation:** Only call `signal_manager.confirm_execution()` once per account (in `process_account()`, not in `execute()`).
+
+- **Disabled Account Handling:** Disabled accounts (with `enabled=False`) are only processed if they have non-zero positions in `account_asset_depths.json` that need to be closed. This optimization avoids unnecessary API calls and log spam while ensuring positions are properly closed when disabling an account.
 
 This architecture provides a robust framework for managing positions across multiple exchanges based on weighted signals from various sources. The system's modular design allows easy addition of new signal sources or exchanges while maintaining reliability through careful state management and error handling.
