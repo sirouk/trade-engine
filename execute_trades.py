@@ -30,9 +30,10 @@ class TradeExecutor:
     sleep_time = 0.5
     ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     
-    # Rate limiting: Semaphore to limit concurrent API calls per exchange
-    # This prevents hitting exchange rate limits when processing symbols in parallel
-    MAX_CONCURRENT_SYMBOL_REQUESTS = 10
+    # Note: Rate limiting is now per-exchange (set in each account processor's __init__)
+    # Each exchange has its own MAX_CONCURRENT_SYMBOL_REQUESTS based on their API limits
+    # Default fallback if account doesn't specify
+    DEFAULT_MAX_CONCURRENT_SYMBOL_REQUESTS = 10
     
     def _load_weight_config(self) -> bool:
         """Load signal weight configuration from file. Returns True if successful."""
@@ -63,10 +64,6 @@ class TradeExecutor:
         self._symbol_details_cache = {}
         self._cache_ttl = 3600  # Cache for 1 hour (symbol details rarely change)
         self._cache_timestamp = {}
-        
-        # Validate semaphore configuration
-        if self.MAX_CONCURRENT_SYMBOL_REQUESTS <= 0:
-            raise ValueError(f"MAX_CONCURRENT_SYMBOL_REQUESTS must be > 0, got {self.MAX_CONCURRENT_SYMBOL_REQUESTS}")
 
         # Initialize processors with enabled state based on non-zero weights
         self.bittensor_processor = BittensorProcessor(
@@ -234,19 +231,41 @@ class TradeExecutor:
         This reduces processing time per exchange from ~6-8s to ~2-3s.
         
         All original logic is preserved including:
-        - Disabled account handling
+        - Disabled account handling (only processes if positions need closing)
         - Error handling per symbol
         - Cache confirmation
         """
         account_start_time = time.time()
         
         try:
-            # Skip disabled accounts but still process with zero depths IN PARALLEL
+            # Skip disabled accounts unless they have positions that need closing
             if not account.enabled:
-                logger.info(f"Skipping disabled account: {account.exchange_name}")
-                # Process all symbols with zero depth concurrently for speed
+                # Check if account has any non-zero positions in cache
+                has_open_positions = False
+                try:
+                    with open('account_asset_depths.json', 'r') as f:
+                        depths_cache = json.load(f)
+                        account_depths = depths_cache.get(account.exchange_name, {})
+                        has_open_positions = any(float(depth) != 0 for depth in account_depths.values())
+                except (FileNotFoundError, json.JSONDecodeError, KeyError):
+                    # If cache doesn't exist or is invalid, err on the side of caution and process
+                    has_open_positions = True
+                
+                if not has_open_positions:
+                    logger.info(f"Skipping disabled account {account.exchange_name}: no open positions")
+                    return True, None
+                
+                # Only process symbols that actually have positions
+                symbols_with_positions = [
+                    config for config in self.weight_config 
+                    if float(account_depths.get(config['symbol'], 0)) != 0
+                ]
+                
+                logger.info(f"Processing disabled account {account.exchange_name}: closing {len(symbols_with_positions)} open positions: {', '.join(c['symbol'] for c in symbols_with_positions)}")
+                
+                # Process only symbols with positions, set them to zero
                 tasks = []
-                for symbol_config in self.weight_config:
+                for symbol_config in symbols_with_positions:
                     signal_symbol = symbol_config['symbol']
                     exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
                     task = account.reconcile_position(
@@ -274,19 +293,36 @@ class TradeExecutor:
 
             logger.info(f"Processing {account.exchange_name} with total value: {total_value}")
 
-            # *** OPTIMIZATION: Process all symbols in parallel ***
-            # Create a semaphore to limit concurrent requests and avoid rate limits
-            semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_SYMBOL_REQUESTS)
+            # *** OPTIMIZATION: Only process symbols that changed ***
+            changed_symbols = self.signal_manager.get_changed_symbols(account.exchange_name)
+            
+            if changed_symbols:
+                # Filter to only process changed symbols
+                symbols_to_process = [
+                    config for config in self.weight_config 
+                    if config['symbol'] in changed_symbols
+                ]
+                logger.info(f"{account.exchange_name} processing {len(symbols_to_process)} changed symbols: {', '.join(changed_symbols)}")
+            else:
+                # No changes detected, but still process if this is first run or error recovery
+                symbols_to_process = self.weight_config
+                logger.info(f"{account.exchange_name} processing all {len(symbols_to_process)} symbols (first run or recovery)")
+
+            # *** OPTIMIZATION: Process symbols in parallel with rate limiting ***
+            # Use exchange-specific limit or fallback to default
+            max_concurrent = getattr(account, 'MAX_CONCURRENT_SYMBOL_REQUESTS', self.DEFAULT_MAX_CONCURRENT_SYMBOL_REQUESTS)
+            semaphore = asyncio.Semaphore(max_concurrent)
+            logger.info(f"{account.exchange_name} rate limit: {max_concurrent} concurrent requests")
             
             async def process_with_semaphore(symbol_config):
                 """Wrapper to limit concurrent API calls per exchange."""
                 async with semaphore:
                     return await self._process_symbol(account, symbol_config, signals, total_value)
             
-            # Create tasks for all symbols
+            # Create tasks for only the symbols we need to process
             tasks = [
                 asyncio.create_task(process_with_semaphore(config))
-                for config in self.weight_config
+                for config in symbols_to_process
             ]
             
             # Wait for all symbols to complete
@@ -383,8 +419,13 @@ async def main():
     logger.info("  - Parallel symbol processing within each exchange")
     logger.info("  - Symbol details caching (1 hour TTL)")
     logger.info("  - Non-blocking asyncio sleep")
-    logger.info("  - Rate limiting with semaphores")
-    logger.info(f"  - Max concurrent symbol requests: {executor.MAX_CONCURRENT_SYMBOL_REQUESTS}")
+    logger.info("  - Per-exchange rate limiting with semaphores")
+    logger.info(f"  - Default concurrent requests: {executor.DEFAULT_MAX_CONCURRENT_SYMBOL_REQUESTS}")
+    
+    # Log each account's specific rate limit
+    for account in executor.accounts:
+        limit = getattr(account, 'MAX_CONCURRENT_SYMBOL_REQUESTS', executor.DEFAULT_MAX_CONCURRENT_SYMBOL_REQUESTS)
+        logger.info(f"  - {account.exchange_name}: {limit} concurrent requests/cycle")
     
     while True:
         try:

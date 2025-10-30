@@ -1,7 +1,7 @@
 import ujson as json
 import logging
 import os
-from typing import Dict, List, Set
+from typing import Dict, List
 import importlib
 import inspect
 import asyncio
@@ -22,6 +22,7 @@ class SignalManager:
         self.config = self._load_config()
         self.previous_signals = {}  # Track previous raw signals
         self._temp_depths = {}  # Initialize temp depths
+        self._changed_symbols = {}  # Track which symbols changed per account: {account_name: [symbol, ...]}
         self._initialize_processors()
         self.processors = self.signal_processors  # For compatibility with existing code
         self._last_asset_mapping_check = 0  # Track last time we checked asset mapping config
@@ -209,12 +210,15 @@ class SignalManager:
                 #logger.info(f"  Combined depth: {asset_depths[symbol]}")
         
         #logger.info("\n=== Account Asset Depths ===")
-        # Check each account for changes
+        # Check each account for changes and track which symbols changed
         #has_updates = False
+        self._changed_symbols = {}  # Reset changed symbols tracker
+        
         for account_name in all_account_names:
             account = next((acc for acc in accounts_to_check if acc.exchange_name == account_name), None)
             is_enabled = account.enabled if account else False
             current_depths = self.account_asset_depths.get(account_name, {})
+            self._changed_symbols[account_name] = []  # Initialize list for this account
             
             for asset, new_depth in asset_depths.items():
                 current_depth = current_depths.get(asset, 0)
@@ -224,15 +228,27 @@ class SignalManager:
                 current_depth = float(current_depth)
                 target_depth = float(target_depth)
                 
-                if current_depth != target_depth:
-                    logger.info(f"Depth change detected for {account_name} on {asset}: current={current_depth}, target={target_depth}")
+                # Add tolerance threshold to avoid unnecessary updates from floating point differences
+                # Only update if change is significant (> 0.0001 or > 0.1% of larger value)
+                depth_diff = abs(target_depth - current_depth)
+                depth_tolerance = max(0.0001, max(abs(current_depth), abs(target_depth)) * 0.001)
+                
+                if depth_diff > depth_tolerance:
+                    logger.info(f"Depth change detected for {account_name} on {asset}: current={current_depth}, target={target_depth}, diff={depth_diff:.6f}")
                     has_updates = True
                     new_depths[account_name][asset] = target_depth
+                    self._changed_symbols[account_name].append(asset)  # Track this symbol changed
                     # Mark all sources for this asset as needing updates
-                    for source_config in next(
-                        sc['sources'] for sc in self.config if sc['symbol'] == asset
-                    ):
-                        updates[source_config['source']] = True
+                    # Find symbol config for this asset - use default empty list if not found
+                    symbol_config = next(
+                        (sc for sc in self.config if sc['symbol'] == asset),
+                        None
+                    )
+                    if symbol_config:
+                        for source_config in symbol_config.get('sources', []):
+                            updates[source_config['source']] = True
+                    else:
+                        logger.warning(f"Symbol {asset} not found in config, cannot mark sources for update")
         
         if has_updates:
             self._temp_depths = new_depths
@@ -242,6 +258,10 @@ class SignalManager:
             #logger.info("No depth changes detected")
         
         return updates
+    
+    def get_changed_symbols(self, account_name: str) -> List[str]:
+        """Get list of symbols that changed for a specific account."""
+        return self._changed_symbols.get(account_name, [])
     
     async def confirm_execution(self, account_name: str, success: bool):
         """Confirm successful execution for an account and update its cache."""
