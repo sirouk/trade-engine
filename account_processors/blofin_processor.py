@@ -456,11 +456,29 @@ class BloFin:
             decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
             size_diff = float(f"%.{decimal_places}f" % (size - current_size))
             
-            print(f"{self.log_prefix} Current size: {current_size}, Target size: {size}, Size difference: {size_diff}")
-
-            if size_diff == 0:
-                print(f"{self.log_prefix} Position for {symbol} is already at the target size.")
-                return
+            # Tolerance logic to prevent unnecessary trades:
+            # 1. If closing position (target=0): only skip if already effectively zero (current <= min_lots)
+            # 2. If opening position (current=0): always proceed
+            # 3. If both non-zero: use tolerance (lot_size or 0.1% of position) to avoid tiny adjustments
+            if size == 0:
+                # Closing position: only skip if current is already effectively zero
+                if abs(current_size) <= min_lots:
+                    print(f"{self.log_prefix} Position for {symbol} is already effectively closed (size={abs(current_size):.6f} <= min={min_lots}).")
+                    return
+                # Otherwise, always close (size_diff ensures we proceed)
+            elif abs(current_size) == 0:
+                # Opening position: always proceed
+                pass
+            else:
+                # Both non-zero: use tolerance to avoid unnecessary trades
+                # Tolerance = max(lot_size, 0.1% of smaller position value)
+                position_tolerance = max(lot_size, min(abs(current_size), abs(size)) * 0.001)
+                
+                if abs(size_diff) <= position_tolerance:
+                    print(f"{self.log_prefix} Position for {symbol} is already at target size (current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}, tolerance={position_tolerance:.6f}).")
+                    return
+            
+            print(f"{self.log_prefix} Adjusting position: current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}")
 
             # Determine the side of the new order (buy/sell)
             side = "Buy" if size_diff > 0 else "Sell"
