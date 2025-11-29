@@ -19,12 +19,12 @@ class TradingViewSignal(BaseModel):
     direction: str = Field(..., example="long", description="Position direction: long, short, or flat")
     action: str = Field(..., example="buy", description="Trade action: buy or sell")
     size: str = Field(..., example="14.08/100", description="Position size as fraction (e.g. '14.08/100' for long, '-14.08/100' for short, '0/100' for exits)")
-    # Optional fields (still accepted but hidden from docs)
-    leverage: str = Field(None, description="Leverage multiplier (empty string or omit for exits)")
-    priority: str = Field(None, json_schema_extra={"hidden": True})
-    takeprofit: str = Field(None, json_schema_extra={"hidden": True})
-    trailstop: str = Field(None, json_schema_extra={"hidden": True})
-    price: str = Field(None, description="Signal price at time of alert")
+    # Optional fields (still accepted but hidden from docs) - default to strings for processor compatibility
+    leverage: str = Field("", description="Leverage multiplier (empty string or omit for exits)")
+    priority: str = Field("", json_schema_extra={"hidden": True})
+    takeprofit: str = Field("0.0", json_schema_extra={"hidden": True})
+    trailstop: str = Field("0.0", json_schema_extra={"hidden": True})
+    price: str = Field("0.0", description="Signal price at time of alert")
 
     @field_validator("direction")
     @classmethod
