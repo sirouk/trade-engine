@@ -473,13 +473,14 @@ class KuCoin:
             size_diff = float(f"%.{decimal_places}f" % (size - current_size))
             
             # Tolerance logic to prevent unnecessary trades:
-            # 1. If closing position (target=0): only skip if already effectively zero (current <= min_lots)
+            # 1. If closing position (target=0): only skip if already below tradable minimum (current < min_lots)
             # 2. If opening position (current=0): always proceed
             # 3. If both non-zero: use tolerance (lot_size or 0.1% of position) to avoid tiny adjustments
             if size == 0:
-                # Closing position: only skip if current is already effectively zero
-                if abs(current_size) <= min_lots:
-                    print(f"{self.log_prefix} Position for {symbol} is already effectively closed (size={abs(current_size):.6f} <= min={min_lots}).")
+                # Closing position: only skip if current size is strictly below min tradable lot.
+                # If size equals min_lots, it is still a real open position and must be closed.
+                if abs(current_size) < min_lots:
+                    print(f"{self.log_prefix} Position for {symbol} is already effectively closed (size={abs(current_size):.6f} < min={min_lots}).")
                     return
                 # Otherwise, always close (size_diff ensures we proceed)
             elif abs(current_size) == 0:
@@ -490,7 +491,7 @@ class KuCoin:
                 # Tolerance = max(lot_size, 0.1% of smaller position value)
                 position_tolerance = max(lot_size, min(abs(current_size), abs(size)) * 0.001)
                 
-                if abs(size_diff) <= position_tolerance:
+                if abs(size_diff) < position_tolerance:
                     print(f"{self.log_prefix} Position for {symbol} is already at target size (current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}, tolerance={position_tolerance:.6f}).")
                     return
             
