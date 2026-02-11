@@ -14,6 +14,32 @@ class SignalManager:
     ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     SIGNAL_PROCESSORS_DIR = "signal_processors"
     ACCOUNT_PROCESSORS_DIR = "account_processors"
+
+    @staticmethod
+    def _canonical_account_name(account_name: str) -> str:
+        """Normalize account names for case-insensitive matching."""
+        return str(account_name).strip().lower()
+
+    @staticmethod
+    def _merge_depth_maps(base: Dict, incoming: Dict) -> Dict:
+        """
+        Merge per-symbol depth maps.
+        If a symbol exists in both maps, keep the entry with larger absolute depth.
+        """
+        merged = dict(base or {})
+        if not isinstance(incoming, dict):
+            return merged
+
+        for symbol, value in incoming.items():
+            if symbol not in merged:
+                merged[symbol] = value
+                continue
+            try:
+                if abs(float(value)) > abs(float(merged[symbol])):
+                    merged[symbol] = value
+            except (TypeError, ValueError):
+                merged[symbol] = value
+        return merged
     
     def __init__(self):
         self.signal_processors = {}  # {source_name: processor_instance}
@@ -90,6 +116,23 @@ class SignalManager:
                             self.account_processors[processor.exchange_name] = processor
                 except Exception as e:
                     logger.error(f"Error loading account processor from {filename}: {e}")
+
+    def _resolve_account_key(self, account_name: str, candidates: Dict | None = None) -> str | None:
+        """
+        Resolve account key with case-insensitive matching.
+        Returns the exact key present in `candidates`, if found.
+        """
+        if candidates is None:
+            candidates = self._temp_depths if hasattr(self, "_temp_depths") else {}
+
+        if account_name in candidates:
+            return account_name
+
+        canonical = self._canonical_account_name(account_name)
+        for key in candidates.keys():
+            if self._canonical_account_name(key) == canonical:
+                return key
+        return None
     
     def _should_reload_asset_mapping(self) -> bool:
         """Check if we should reload asset mapping configuration."""
@@ -126,19 +169,59 @@ class SignalManager:
         
         #logger.info("\n=== Signal Source Depths ===")
         # If no accounts provided, use all known account processors
-        accounts_to_check = accounts if accounts is not None else self.account_processors.values()
-        
-        # Track all accounts that exist in either current accounts or cache
-        all_account_names = set(acc.exchange_name for acc in accounts_to_check) | set(self.account_asset_depths.keys())
-        
-        # Initialize with current depths instead of zeros
-        for account_name in all_account_names:
-            account = next((acc for acc in accounts_to_check if acc.exchange_name == account_name), None)
+        accounts_to_check = list(accounts) if accounts is not None else list(self.account_processors.values())
+
+        # Build canonical account registry from active processors.
+        account_by_canonical = {}
+        for account in accounts_to_check:
+            canonical = self._canonical_account_name(account.exchange_name)
+            existing = account_by_canonical.get(canonical)
+            # Prefer enabled account if both canonical names appear.
+            if existing is None or (not getattr(existing, "enabled", False) and getattr(account, "enabled", False)):
+                account_by_canonical[canonical] = account
+
+        # Canonicalize/merge cache keys to avoid duplicates like "BloFin" vs "blofin".
+        cache_by_canonical = {}
+        cache_aliases = {}
+        for raw_name, raw_depths in (self.account_asset_depths or {}).items():
+            canonical = self._canonical_account_name(raw_name)
+            cache_aliases.setdefault(canonical, set()).add(raw_name)
+            cache_by_canonical[canonical] = self._merge_depth_maps(
+                cache_by_canonical.get(canonical, {}),
+                raw_depths if isinstance(raw_depths, dict) else {},
+            )
+
+        all_canonical_accounts = set(account_by_canonical.keys()) | set(cache_by_canonical.keys())
+
+        # Map canonical names back to runtime/display keys.
+        display_by_canonical = {}
+        canonical_by_display = {}
+        for canonical in all_canonical_accounts:
+            account = account_by_canonical.get(canonical)
+            if account is not None:
+                display = account.exchange_name
+            else:
+                # Keep an existing cache alias when no active processor exists.
+                aliases = sorted(cache_aliases.get(canonical, {canonical}))
+                display = aliases[0]
+            display_by_canonical[canonical] = display
+            canonical_by_display[display] = canonical
+
+        # Track aliases for cache cleanup during confirmation.
+        self._account_aliases = {}
+        for canonical, display in display_by_canonical.items():
+            aliases = set(cache_aliases.get(canonical, set()))
+            aliases.add(display)
+            self._account_aliases[display] = aliases
+
+        # Initialize with current depths (canonicalized) instead of zeros.
+        for account_name, canonical in canonical_by_display.items():
+            account = account_by_canonical.get(canonical)
             is_enabled = account.enabled if account else False
-            
-            # Start with current depths instead of zeros
-            new_depths[account_name] = self.account_asset_depths.get(account_name, {}).copy()
-            
+            _ = is_enabled  # Explicitly retained for readability symmetry.
+
+            new_depths[account_name] = dict(cache_by_canonical.get(canonical, {}))
+
             # Only initialize missing symbols
             for symbol_config in self.config:
                 symbol = symbol_config['symbol']
@@ -214,10 +297,10 @@ class SignalManager:
         #has_updates = False
         self._changed_symbols = {}  # Reset changed symbols tracker
         
-        for account_name in all_account_names:
-            account = next((acc for acc in accounts_to_check if acc.exchange_name == account_name), None)
+        for account_name, canonical in canonical_by_display.items():
+            account = account_by_canonical.get(canonical)
             is_enabled = account.enabled if account else False
-            current_depths = self.account_asset_depths.get(account_name, {})
+            current_depths = cache_by_canonical.get(canonical, {})
             self._changed_symbols[account_name] = []  # Initialize list for this account
             
             for asset, new_depth in asset_depths.items():
@@ -254,37 +337,55 @@ class SignalManager:
             self._temp_depths = new_depths
             logger.info(f"Updates needed: {new_depths}")
         else:
-            self._temp_depths = self.account_asset_depths  # Use current depths if no updates
+            # Keep canonicalized/normalized keys even when unchanged.
+            self._temp_depths = new_depths
             #logger.info("No depth changes detected")
         
         return updates
     
     def get_changed_symbols(self, account_name: str) -> List[str]:
         """Get list of symbols that changed for a specific account."""
-        return self._changed_symbols.get(account_name, [])
+        resolved = self._resolve_account_key(account_name, self._changed_symbols)
+        if resolved is None:
+            return []
+        return self._changed_symbols.get(resolved, [])
     
     async def confirm_execution(self, account_name: str, success: bool):
         """Confirm successful execution for an account and update its cache."""
         try:
             if success and hasattr(self, '_temp_depths'):
-                if account_name in self._temp_depths:
+                resolved_name = self._resolve_account_key(account_name, self._temp_depths)
+                if resolved_name is not None:
                     async with self._cache_lock:
                         current_cache = self._load_cache()
-                        current_cache[account_name] = self._temp_depths[account_name]
+                        canonical = self._canonical_account_name(resolved_name)
+                        # Remove stale aliases for same account key (e.g., BloFin vs blofin).
+                        for key in list(current_cache.keys()):
+                            if self._canonical_account_name(key) == canonical:
+                                current_cache.pop(key, None)
+                        current_cache[resolved_name] = self._temp_depths[resolved_name]
                         self.account_asset_depths = current_cache
                         await self._save_cache()
-                        logger.info(f"Updated cache for {account_name}")
+                        logger.info(f"Updated cache for {resolved_name}")
         except Exception as e:
             logger.error(f"Error updating cache for {account_name}: {str(e)}")
 
     async def _update_cache(self, account_name: str):
         """Handle the actual cache update with locking."""
         async with self._cache_lock:
-            if account_name not in self.previous_signals:
-                self.previous_signals[account_name] = {}
-            
+            resolved_name = self._resolve_account_key(account_name, self._temp_depths)
+            if resolved_name is None:
+                return
+
+            if resolved_name not in self.previous_signals:
+                self.previous_signals[resolved_name] = {}
+
             current_cache = self._load_cache()
-            current_cache[account_name] = self._temp_depths[account_name]
+            canonical = self._canonical_account_name(resolved_name)
+            for key in list(current_cache.keys()):
+                if self._canonical_account_name(key) == canonical:
+                    current_cache.pop(key, None)
+            current_cache[resolved_name] = self._temp_depths[resolved_name]
             self.account_asset_depths = current_cache
             await self._save_cache()
-            logger.info(f"Updated cache for {account_name}") 
+            logger.info(f"Updated cache for {resolved_name}")

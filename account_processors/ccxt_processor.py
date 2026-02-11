@@ -622,11 +622,24 @@ class CCXTProcessor:
             for pos in positions:
                 # Use CCXT's standardized fields for margin calculation
                 # CCXT provides initialMargin or we can calculate from notional/leverage
-                if 'initialMargin' in pos:
-                    position_margin += float(pos['initialMargin'])
-                elif 'notional' in pos and 'leverage' in pos and pos['leverage'] > 0:
+                initial_margin = pos.get('initialMargin')
+                notional = pos.get('notional')
+                leverage = pos.get('leverage')
+
+                if initial_margin not in (None, ""):
+                    position_margin += float(initial_margin)
+                elif (
+                    notional not in (None, "")
+                    and leverage not in (None, "")
+                    and float(leverage) > 0
+                ):
                     # Initial margin = notional / leverage
-                    position_margin += abs(float(pos['notional'])) / float(pos['leverage'])
+                    position_margin += abs(float(notional)) / float(leverage)
+                else:
+                    # Some exchanges (including BloFin via CCXT) expose margin only in raw info.
+                    info_margin = (pos.get('info') or {}).get('margin')
+                    if info_margin not in (None, ""):
+                        position_margin += float(info_margin)
             
             total_value = available_balance + position_margin
             return total_value

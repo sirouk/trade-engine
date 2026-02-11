@@ -25,6 +25,7 @@ class BloFinCredentials:
     api_secret: str
     api_passphrase: str
     leverage_override: int = 0
+    copy_trading: bool = False
 
 @dataclass
 class KuCoinCredentials:
@@ -155,6 +156,7 @@ def load_credentials(file_path: str) -> Credentials:
             api_secret=blofin_creds.get('api_secret', ""),
             api_passphrase=blofin_creds.get('api_passphrase', ""),
             leverage_override=int(blofin_creds.get('leverage_override', 0)),
+            copy_trading=blofin_creds.get('copy_trading', False),
         ),
         kucoin=KuCoinCredentials(
             api_key=kucoin_creds.get('api_key', ""),
@@ -422,6 +424,13 @@ def ensure_blofin_credentials(credentials: Credentials, skip_prompt: bool = Fals
         # Still ask about leverage override even if other credentials aren't changing
         if prompt_for_changes("BloFin leverage override", skip_prompt):
             credentials.blofin.leverage_override = prompt_for_leverage_override("BloFin", credentials.blofin.leverage_override)
+        if prompt_for_changes("BloFin copy trading mode", skip_prompt):
+            current_mode = "yes" if credentials.blofin.copy_trading else "no"
+            copy_mode = input(
+                f"Is this a BloFin copy trading account? (yes/no) [current: {current_mode}]: "
+            ).strip().lower()
+            if copy_mode in ("yes", "no"):
+                credentials.blofin.copy_trading = copy_mode == "yes"
         return credentials
 
     if not credentials.blofin.api_key or prompt_for_changes("BloFin API key", skip_prompt):
@@ -438,6 +447,12 @@ def ensure_blofin_credentials(credentials: Credentials, skip_prompt: bool = Fals
 
     # Always prompt for leverage override when setting up new credentials
     credentials.blofin.leverage_override = prompt_for_leverage_override("BloFin", credentials.blofin.leverage_override)
+    current_mode = "yes" if credentials.blofin.copy_trading else "no"
+    copy_mode = input(
+        f"Is this a BloFin copy trading account? (yes/no) [default: {current_mode}]: "
+    ).strip().lower()
+    if copy_mode in ("yes", "no"):
+        credentials.blofin.copy_trading = copy_mode == "yes"
     save_credentials(credentials, CREDENTIALS_FILE)
     return credentials
 

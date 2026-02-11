@@ -34,6 +34,32 @@ class TradeExecutor:
     # Each exchange has its own MAX_CONCURRENT_SYMBOL_REQUESTS based on their API limits
     # Default fallback if account doesn't specify
     DEFAULT_MAX_CONCURRENT_SYMBOL_REQUESTS = 10
+
+    @staticmethod
+    def _canonical_account_name(account_name: str) -> str:
+        """Normalize account names for case-insensitive matching."""
+        return str(account_name).strip().lower()
+
+    def _resolve_account_key(self, mapping: Dict, account_name: str):
+        """Resolve a mapping key by exact match first, then case-insensitive match."""
+        if not isinstance(mapping, dict):
+            return None
+        if account_name in mapping:
+            return account_name
+
+        canonical = self._canonical_account_name(account_name)
+        for key in mapping.keys():
+            if self._canonical_account_name(key) == canonical:
+                return key
+        return None
+
+    def _get_account_depths(self, mapping: Dict, account_name: str) -> Dict:
+        """Get account depth map with case-insensitive key resolution."""
+        resolved = self._resolve_account_key(mapping, account_name)
+        if resolved is None:
+            return {}
+        account_depths = mapping.get(resolved, {})
+        return account_depths if isinstance(account_depths, dict) else {}
     
     def _load_weight_config(self) -> bool:
         """Load signal weight configuration from file. Returns True if successful."""
@@ -171,7 +197,8 @@ class TradeExecutor:
         """
         try:
             signal_symbol = symbol_config['symbol']
-            depth = signals.get(account.exchange_name, {}).get(signal_symbol, 0)
+            account_signals = self._get_account_depths(signals, account.exchange_name)
+            depth = account_signals.get(signal_symbol, 0)
             
             # Map to exchange symbol format
             exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
@@ -245,7 +272,7 @@ class TradeExecutor:
                 try:
                     with open('account_asset_depths.json', 'r') as f:
                         depths_cache = json.load(f)
-                        account_depths = depths_cache.get(account.exchange_name, {})
+                        account_depths = self._get_account_depths(depths_cache, account.exchange_name)
                         has_open_positions = any(float(depth) != 0 for depth in account_depths.values())
                 except (FileNotFoundError, json.JSONDecodeError, KeyError):
                     # If cache doesn't exist or is invalid, err on the side of caution and process
