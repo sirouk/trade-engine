@@ -312,11 +312,16 @@ class TradeExecutor:
                 
             # Get total account value (including positions)
             total_value = await account.fetch_initial_account_value()
-            if not total_value:
-                logger.warning(f"No account value found for {account.exchange_name}")
-                # Still update cache even with zero balance
+            if total_value is None:
+                logger.warning(f"No account value found for {account.exchange_name} (account value fetch failed)")
+                # Do NOT confirm cache on API failures; keep updates pending so we retry next cycle.
+                await self.signal_manager.confirm_execution(account.exchange_name, False)
+                return False, f"No account value found for {account.exchange_name}"
+
+            if float(total_value) == 0.0:
+                logger.info(f"{account.exchange_name}: account value is 0.0; skipping execution")
                 await self.signal_manager.confirm_execution(account.exchange_name, True)
-                return False, None
+                return True, None
 
             logger.info(f"Processing {account.exchange_name} with total value: {total_value}")
 
@@ -364,12 +369,19 @@ class TradeExecutor:
             if failed:
                 logger.warning(f"{account.exchange_name}: {len(failed)} symbols failed processing")
 
-            # Update cache after successful execution
-            await self.signal_manager.confirm_execution(account.exchange_name, True)
+            # Only confirm cache if everything succeeded; otherwise we'll keep seeing updates
+            # and retry instead of falsely "accepting" the new target depths.
+            account_success = (not errors) and (not failed)
+            if account_success:
+                await self.signal_manager.confirm_execution(account.exchange_name, True)
+            else:
+                await self.signal_manager.confirm_execution(account.exchange_name, False)
             
             elapsed = time.time() - account_start_time
             logger.info(f"Updated cache for {account.exchange_name} (completed in {elapsed:.2f}s)")
-            return True, None
+            if account_success:
+                return True, None
+            return False, f"{account.exchange_name} had symbol failures (exceptions={len(errors)}, failed={len(failed)})"
 
         except Exception as e:
             error_msg = f"Error processing {account.exchange_name}: {str(e)}"

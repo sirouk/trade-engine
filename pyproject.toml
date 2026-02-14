@@ -35,6 +35,8 @@ dependencies = [
     "pybit",
     # blofin from the copytrading branch
     "blofin @ git+https://github.com/sirouk/blofin-python.git@copytrading",
+    # Used to bypass Cloudflare-managed challenges on BloFin endpoints by impersonating a real browser TLS fingerprint.
+    "curl_cffi",
     "kucoin-futures-python @ git+https://github.com/sirouk/kucoin-futures-python-sdk",
     "pymexc @ git+https://github.com/sirouk/pymexc",
     "numpy",
