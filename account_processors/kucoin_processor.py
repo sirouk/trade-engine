@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from kucoin_futures.client import UserData, Trade, Market # https://github.com/Kucoin/kucoin-futures-python-sdk
 from config.credentials import load_kucoin_credentials
-from core.utils.modifiers import scale_size_and_price
+from core.utils.modifiers import scale_size_and_price, sanitize_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -248,28 +248,42 @@ class KuCoin:
 
             # If the size is already in lot size, don't scale it
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
+            lots = sanitize_lots(
+                lots,
+                lot_size,
+                min_lots,
+                allow_below_min_to_zero=not scale_lot_size,
+                rounding="nearest" if scale_lot_size else "down",
+            )
+            if lots == 0:
+                print(f"{self.log_prefix} Skipping {symbol} {side} order: size below minimum/step.")
+                return None
             print(f"{self.log_prefix} Processing {lots} lots of {symbol} with a {side} order")
             
             kucoin_margin_mode = self.margin_mode_map.get(margin_mode, margin_mode)
             
             # Check if order size exceeds maximum order quantity
-            if lots > max_size:
-                print(f"{self.log_prefix} Order size {lots} exceeds max order qty {max_size}. Splitting into chunks.")
+            max_chunk = sanitize_lots(max_size, lot_size, min_lots, rounding="down")
+            if max_chunk <= 0:
+                print(f"{self.log_prefix} Invalid max order qty for {symbol}: {max_size}")
+                return None
+
+            if lots > max_chunk:
+                print(f"{self.log_prefix} Order size {lots} exceeds max order qty {max_chunk}. Splitting into chunks.")
                 
                 # Calculate number of full chunks and remainder
-                num_full_chunks = int(lots // max_size)
-                remainder = lots % max_size
-                
-                # Round remainder to lot size precision
-                decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-                remainder = float(f"%.{decimal_places}f" % remainder)
+                num_full_chunks = int(lots // max_chunk)
+                remainder = lots - (num_full_chunks * max_chunk)
+                if remainder < 0:
+                    remainder = 0.0
+                remainder = sanitize_lots(remainder, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
                 
                 orders = []
                 total_executed = 0
                 
                 # Place full-sized chunks
                 for i in range(num_full_chunks):
-                    chunk_size = max_size
+                    chunk_size = max_chunk
                     print(f"{self.log_prefix} Placing chunk {i+1}/{num_full_chunks + (1 if remainder > 0 else 0)}: {chunk_size} lots")
                     
                     client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -469,8 +483,7 @@ class KuCoin:
                 current_size = 0 # Update current size to 0 after closing the position
 
             # Calculate size difference with proper precision
-            decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-            size_diff = float(f"%.{decimal_places}f" % (size - current_size))
+            size_diff = sanitize_lots(size - current_size, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
             
             # Tolerance logic to prevent unnecessary trades:
             # 1. If closing position (target=0): only skip if already below tradable minimum (current < min_lots)
@@ -561,7 +574,7 @@ class KuCoin:
             return f"{base}USDTM"
         return signal_symbol
 
-    async def fetch_initial_account_value(self) -> float:
+    async def fetch_initial_account_value(self) -> float | None:
         """Calculate total account value from balance and initial margin of positions."""
         try:
             # First check if account is enabled
@@ -570,11 +583,15 @@ class KuCoin:
             
             # Get available balance
             balance = await self.fetch_balance("USDT")
-            available_balance = float(balance) if balance else 0.0
+            if balance is None:
+                return None
+            available_balance = float(balance)
             print(f"{self.log_prefix} Available Balance: {available_balance} USDT")
             
             # Get positions directly - KuCoin provides posInit (initial margin)
             positions = await self.fetch_all_open_positions()
+            if positions is None:
+                return None
             position_margin = 0.0
             
             # Handle both empty positions and zero balance cases
@@ -596,7 +613,7 @@ class KuCoin:
             
         except Exception as e:
             print(f"{self.log_prefix} Error calculating initial account value: {str(e)}")
-            return 0.0
+            return None
 
 
 async def main():

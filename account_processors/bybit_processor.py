@@ -2,7 +2,7 @@ import asyncio
 import datetime
 from pybit.unified_trading import HTTP # https://github.com/bybit-exchange/pybit/
 from config.credentials import load_bybit_credentials
-from core.utils.modifiers import scale_size_and_price
+from core.utils.modifiers import scale_size_and_price, sanitize_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -341,26 +341,40 @@ class ByBit:
             max_market_order_qty = float(instrument["result"]["list"][0]["lotSizeFilter"].get("maxMktOrderQty", max_size))
             
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
+            lots = sanitize_lots(
+                lots,
+                lot_size,
+                min_lots,
+                allow_below_min_to_zero=not scale_lot_size,
+                rounding="nearest" if scale_lot_size else "down",
+            )
+            if lots == 0:
+                print(f"{self.log_prefix} Skipping {symbol} {side} order: size below minimum/step.")
+                return None
             print(f"{self.log_prefix} Processing {lots} lots of {symbol} with a {side} order.")
             
             # Check if order size exceeds maximum market order quantity
-            if lots > max_market_order_qty:
-                print(f"{self.log_prefix} Order size {lots} exceeds max market order qty {max_market_order_qty}. Splitting into chunks.")
+            max_chunk = sanitize_lots(max_market_order_qty, lot_size, min_lots, rounding="down")
+            if max_chunk <= 0:
+                print(f"{self.log_prefix} Invalid max market order qty for {symbol}: {max_market_order_qty}")
+                return None
+
+            if lots > max_chunk:
+                print(f"{self.log_prefix} Order size {lots} exceeds max market order qty {max_chunk}. Splitting into chunks.")
                 
                 # Calculate number of full chunks and remainder
-                num_full_chunks = int(lots // max_market_order_qty)
-                remainder = lots % max_market_order_qty
-                
-                # Round remainder to lot size precision
-                decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-                remainder = float(f"%.{decimal_places}f" % remainder)
+                num_full_chunks = int(lots // max_chunk)
+                remainder = lots - (num_full_chunks * max_chunk)
+                if remainder < 0:
+                    remainder = 0.0
+                remainder = sanitize_lots(remainder, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
                 
                 orders = []
                 total_executed = 0
                 
                 # Place full-sized chunks
                 for i in range(num_full_chunks):
-                    chunk_size = max_market_order_qty
+                    chunk_size = max_chunk
                     print(f"{self.log_prefix} Placing chunk {i+1}/{num_full_chunks + (1 if remainder > 0 else 0)}: {chunk_size} lots")
                     
                     client_oid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -602,8 +616,7 @@ class ByBit:
                     print(f"{self.log_prefix} Failed to adjust leverage: {str(e)}")
 
             # Calculate the size difference after potential closure
-            decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-            size_diff = float(f"%.{decimal_places}f" % (size - current_size))
+            size_diff = sanitize_lots(size - current_size, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
             
             # Tolerance logic to prevent unnecessary trades:
             # 1. If closing position (target=0): only skip if already below tradable minimum (current < min_lots)
@@ -690,16 +703,20 @@ class ByBit:
         # Bybit uses the same format as our signals, no conversion needed
         return signal_symbol
 
-    async def fetch_initial_account_value(self) -> float:
+    async def fetch_initial_account_value(self) -> float | None:
         """Calculate total account value from balance and initial margin of positions."""
         try:
             # Get available balance
             balance = await self.fetch_balance("USDT")
-            available_balance = float(balance) if balance else 0.0
+            if balance is None:
+                return None
+            available_balance = float(balance)
             print(f"{self.log_prefix} Available Balance: {available_balance} USDT")
             
             # Get positions directly - Bybit provides positionIM (initial margin)
             positions = await self.fetch_all_open_positions()
+            if positions is None:
+                return None
             position_margin = 0.0
             if positions and "result" in positions:
                 for pos in positions["result"]["list"]:
@@ -715,7 +732,7 @@ class ByBit:
             
         except Exception as e:
             print(f"{self.log_prefix} Error calculating initial account value: {str(e)}")
-            return 0.0
+            return None
 
 
 async def main():   

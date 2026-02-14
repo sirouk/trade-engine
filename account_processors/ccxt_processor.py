@@ -15,7 +15,7 @@ import asyncio
 import datetime
 import ccxt.async_support as ccxt  # pip install "ccxt[async]"
 from config.credentials import load_ccxt_credentials
-from core.utils.modifiers import scale_size_and_price
+from core.utils.modifiers import scale_size_and_price, sanitize_lots, get_ccxt_market_steps
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -137,9 +137,9 @@ class CCXTProcessor:
                 available = balance[instrument]['free']
                 return available
             else:
-                return 0
+                return 0.0
         except Exception as e:
-            return 0
+            return None
             
     async def fetch_all_open_positions(self):
         try:
@@ -156,7 +156,7 @@ class CCXTProcessor:
             )
             return positions
         except Exception as e:
-            return []
+            return None
     
     async def fetch_open_positions(self, symbol):
         try:
@@ -277,12 +277,42 @@ class CCXTProcessor:
                 
             market = self.exchange.markets[symbol]
             
-            # CCXT standardized market info
-            lot_size = float(market['precision']['amount']) if 'precision' in market else 1
-            min_size = float(market['limits']['amount']['min']) if 'limits' in market else lot_size
-            tick_size = float(market['precision']['price']) if 'precision' in market else 0.01
-            contract_value = float(market.get('contractSize', 1))
-            max_size = float(market['limits']['amount']['max']) if 'limits' in market and market['limits']['amount']['max'] else 1000000
+            # CCXT market['precision'] is usually *decimal places*, not a step size.
+            # Some exchanges run in a "tick size" precision mode where it may be a step.
+            precision = market.get("precision") or {}
+
+            def _precision_to_step(value, default: float) -> float:
+                if value is None:
+                    return default
+                if isinstance(value, int):
+                    return 10 ** (-value) if value >= 0 else default
+                if isinstance(value, float):
+                    if value.is_integer():
+                        digits = int(value)
+                        return 10 ** (-digits) if digits >= 0 else default
+                    return float(value)
+                if isinstance(value, str):
+                    try:
+                        if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
+                            digits = int(value)
+                            return 10 ** (-digits) if digits >= 0 else default
+                        return float(value)
+                    except Exception:
+                        return default
+                try:
+                    return float(value)
+                except Exception:
+                    return default
+
+            lot_size = _precision_to_step(precision.get("amount"), 1.0)
+            tick_size = _precision_to_step(precision.get("price"), 0.01)
+
+            limits = market.get("limits") or {}
+            amount_limits = limits.get("amount") or {}
+            min_size = float(amount_limits.get("min", lot_size) or lot_size)
+            max_size = float(amount_limits.get("max") or 1000000)
+
+            contract_value = float(market.get('contractSize', 1) or 1)
             
             return lot_size, min_size, tick_size, contract_value, max_size
         except Exception as e:
@@ -296,6 +326,15 @@ class CCXTProcessor:
 
             # Scale the size if needed
             lots = (scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value))[0] if scale_lot_size else size
+            lots = sanitize_lots(
+                lots,
+                lot_size,
+                min_lots,
+                allow_below_min_to_zero=not scale_lot_size,
+                rounding="nearest" if scale_lot_size else "down",
+            )
+            if lots == 0:
+                return None
             
             # Set leverage before placing order
             try:
@@ -309,23 +348,26 @@ class CCXTProcessor:
             except Exception as e:
                 pass
             
+            max_chunk = sanitize_lots(max_size, lot_size, min_lots, rounding="down")
+            if max_chunk <= 0:
+                return None
+
             # Check if order size exceeds maximum
-            if lots > max_size:
+            if lots > max_chunk:
                 
                 # Calculate number of full chunks and remainder
-                num_full_chunks = int(lots // max_size)
-                remainder = lots % max_size
-                
-                # Round remainder to lot size precision
-                decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-                remainder = float(f"%.{decimal_places}f" % remainder)
+                num_full_chunks = int(lots // max_chunk)
+                remainder = lots - (num_full_chunks * max_chunk)
+                if remainder < 0:
+                    remainder = 0.0
+                remainder = sanitize_lots(remainder, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
                 
                 orders = []
                 total_executed = 0
                 
                 # Place full-sized chunks
                 for i in range(num_full_chunks):
-                    chunk_size = max_size
+                    chunk_size = max_chunk
                     
                     order = await execute_with_timeout(
                         self.exchange.create_market_order,
@@ -411,13 +453,19 @@ class CCXTProcessor:
                     params={'type': 'swap'}
                 )
             else:
+                # Snap reduce-only size to exchange precision/step to avoid "invalid amount" errors.
+                lot_size, min_lots, _, _, max_size = await self.get_symbol_details(symbol)
+                amount = sanitize_lots(abs(contracts), lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
+                if amount == 0:
+                    return None
+
                 # Place opposite market order
                 order = await execute_with_timeout(
                     self.exchange.create_market_order,
                     timeout=5,
                     symbol=symbol,
                     side=close_side,
-                    amount=abs(contracts),
+                    amount=amount,
                     params={
                         'type': 'swap',
                         'reduce_only': True
@@ -490,18 +538,58 @@ class CCXTProcessor:
                 # Determine side for reduction
                 side = "sell" if current_size > 0 else "buy"
                 
-                # Place reduce-only order
-                await execute_with_timeout(
-                    self.exchange.create_market_order,
-                    timeout=5,
-                    symbol=symbol,
-                    side=side,
-                    amount=reduction_size,
-                    params={
-                        'type': 'swap',
-                        'reduce_only': True
-                    }
+                reduction_size = sanitize_lots(
+                    reduction_size,
+                    lot_size,
+                    min_lots,
+                    allow_below_min_to_zero=True,
+                    rounding="down",
                 )
+                if reduction_size > 0:
+                    max_chunk = sanitize_lots(max_size, lot_size, min_lots, rounding="down")
+                    if max_chunk <= 0:
+                        return
+
+                    if reduction_size > max_chunk:
+                        num_full_chunks = int(reduction_size // max_chunk)
+                        remainder = reduction_size - (num_full_chunks * max_chunk)
+                        if remainder < 0:
+                            remainder = 0.0
+                        remainder = sanitize_lots(remainder, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
+
+                        for _ in range(num_full_chunks):
+                            await execute_with_timeout(
+                                self.exchange.create_market_order,
+                                timeout=5,
+                                symbol=symbol,
+                                side=side,
+                                amount=max_chunk,
+                                params={'type': 'swap', 'reduce_only': True},
+                            )
+                            await asyncio.sleep(0.1)
+
+                        if remainder > 0:
+                            await execute_with_timeout(
+                                self.exchange.create_market_order,
+                                timeout=5,
+                                symbol=symbol,
+                                side=side,
+                                amount=remainder,
+                                params={'type': 'swap', 'reduce_only': True},
+                            )
+                    else:
+                        # Place reduce-only order
+                        await execute_with_timeout(
+                            self.exchange.create_market_order,
+                            timeout=5,
+                            symbol=symbol,
+                            side=side,
+                            amount=reduction_size,
+                            params={
+                                'type': 'swap',
+                                'reduce_only': True
+                            }
+                        )
                 current_size = size
             
             # Check for margin mode or leverage changes
@@ -533,8 +621,7 @@ class CCXTProcessor:
                     pass
 
             # Calculate remaining size difference
-            decimal_places = len(str(lot_size).rsplit('.', maxsplit=1)[-1]) if '.' in str(lot_size) else 0
-            size_diff = float(f"%.{decimal_places}f" % (size - current_size))
+            size_diff = sanitize_lots(size - current_size, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
             
             # Tolerance logic to prevent unnecessary trades:
             # 1. If closing position (target=0): only skip if already below tradable minimum (current < min_lots)
@@ -609,15 +696,19 @@ class CCXTProcessor:
             return f"{base}/USDT:USDT"
         return signal_symbol
 
-    async def fetch_initial_account_value(self) -> float:
+    async def fetch_initial_account_value(self) -> float | None:
         """Calculate total account value from balance and initial margin of positions."""
         try:
             # Get available balance
             balance = await self.fetch_balance("USDT")
-            available_balance = float(balance) if balance else 0.0
+            if balance is None:
+                return None
+            available_balance = float(balance)
             
             # Get all positions and calculate total margin
             positions = await self.fetch_all_open_positions()
+            if positions is None:
+                return None
             position_margin = 0.0
             
             for pos in positions:
@@ -646,7 +737,7 @@ class CCXTProcessor:
             return total_value
             
         except Exception as e:
-            return 0.0
+            return None
 
     async def __aenter__(self):
         """Async context manager entry."""
