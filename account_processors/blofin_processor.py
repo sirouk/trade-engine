@@ -1,8 +1,14 @@
 import asyncio
 import datetime
+import os
 from blofin import BloFinClient  # https://github.com/nomeida/blofin-python
 from config.credentials import load_blofin_credentials
-from core.utils.modifiers import scale_size_and_price
+from core.utils.blofin_http import (
+    patch_blofin_cloudflare_transport,
+    verify_patch_working,
+    health_check,
+)
+from core.utils.modifiers import scale_size_and_price, sanitize_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -17,6 +23,33 @@ class BloFin:
     def __init__(self):
         self.exchange_name = "BloFin"
         self.enabled = True
+        self.log_prefix = f"[{self.exchange_name}]"
+        # BloFin endpoints can be Cloudflare/WAF protected; keep burst concurrency conservative.
+        self.MAX_CONCURRENT_SYMBOL_REQUESTS = 5
+
+        # BloFin endpoints can be protected by Cloudflare challenges that block plain `requests`.
+        # Patch the upstream `blofin` package to use `curl_cffi` (browser TLS fingerprint) when available.
+        patch_ok = patch_blofin_cloudflare_transport()
+        if patch_ok:
+            candidates = getattr(patch_blofin_cloudflare_transport, "impersonate_candidates", None)
+            timeout_s = getattr(patch_blofin_cloudflare_transport, "timeout_s", None)
+            effective_impersonate = (
+                ",".join(candidates) if isinstance(candidates, list) and candidates else os.getenv("BLOFIN_IMPERSONATE", "chrome110")
+            )
+            timeout_note = f", timeout={timeout_s}s" if timeout_s else ""
+            print(
+                f"{self.log_prefix} HTTP transport: curl_cffi enabled (impersonate={effective_impersonate}{timeout_note})."
+            )
+            # Verify the patch is actually working with a lightweight health check
+            if not verify_patch_working():
+                print(
+                    f"{self.log_prefix} WARNING: Patch applied but connectivity check failed. "
+                    "BloFin requests may fail."
+                )
+        else:
+            print(
+                f"{self.log_prefix} HTTP transport: curl_cffi not available; BloFin requests may fail with Cloudflare 403 challenges."
+            )
 
         self.credentials = load_blofin_credentials()
         self.copy_trading = bool(getattr(self.credentials.blofin, "copy_trading", False))
@@ -40,8 +73,6 @@ class BloFin:
 
         self.leverage_override = self.credentials.blofin.leverage_override
 
-        # Add logger prefix
-        self.log_prefix = f"[{self.exchange_name}]"
         print(
             f"{self.log_prefix} Using {'copy trading' if self.copy_trading else 'futures'} trading endpoints."
         )
@@ -73,6 +104,30 @@ class BloFin:
             else self.blofin_client.trading.close_positions
         )
 
+    def _ensure_ok(self, resp: dict, context: str):
+        """
+        BloFin often returns HTTP 200 with a non-zero API `code`.
+        If we don't check this, the engine will log "order placed" even when it failed.
+        """
+        if not isinstance(resp, dict):
+            raise RuntimeError(f"{self.log_prefix} {context}: unexpected response type: {type(resp).__name__}")
+
+        code = str(resp.get("code", ""))
+        if code and code != "0":
+            raise RuntimeError(f"{self.log_prefix} {context}: API error code={code} msg={resp.get('msg')!r} resp={resp}")
+
+        data = resp.get("data")
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    item_code = str(item.get("code", "0"))
+                    if item_code and item_code != "0":
+                        raise RuntimeError(
+                            f"{self.log_prefix} {context}: API item error code={item_code} msg={item.get('msg')!r} item={item} resp={resp}"
+                        )
+
+        return resp
+
     async def _close_positions(
         self,
         symbol: str,
@@ -94,11 +149,12 @@ class BloFin:
             if size is not None:
                 kwargs["size"] = size
 
-        return await execute_with_timeout(
+        resp = await execute_with_timeout(
             self._close_positions_api,
             timeout=5,
             **kwargs,
         )
+        return self._ensure_ok(resp, f"close_positions({symbol})")
 
     async def fetch_balance(self, instrument="USDT"):
         try:
@@ -108,6 +164,7 @@ class BloFin:
                 account_type=self.account_type,
                 currency=instrument,
             )
+            self._ensure_ok(balance, f"get_balance({instrument})")
             # {'code': '0', 'msg': 'success', 'data': [{'currency': 'USDT', 'balance': '0.000000000000000000', 'available': '0.000000000000000000', 'frozen': '0.000000000000000000', 'bonus': '0.000000000000000000'}]}
 
             # get coin balance available to trade
@@ -123,7 +180,7 @@ class BloFin:
             positions = await execute_with_timeout(
                 self._get_positions_api, timeout=5
             )
-            return positions
+            return self._ensure_ok(positions, "get_positions(all)")
         except Exception as e:
             print(f"{self.log_prefix} Error fetching all open positions: {str(e)}")
 
@@ -133,7 +190,7 @@ class BloFin:
                 self._get_positions_api, timeout=5, inst_id=symbol
             )
             print(f"{self.log_prefix} Open Positions: {positions}")
-            return positions
+            return self._ensure_ok(positions, f"get_positions({symbol})")
         except Exception as e:
             print(f"{self.log_prefix} Error fetching open positions: {str(e)}")
 
@@ -145,7 +202,7 @@ class BloFin:
                 inst_id=symbol,
             )
             print(f"{self.log_prefix} Open Orders: {orders}")
-            return orders
+            return self._ensure_ok(orders, f"get_active_orders({symbol})")
         except Exception as e:
             print(f"{self.log_prefix} Error fetching open orders: {str(e)}")
 
@@ -155,6 +212,7 @@ class BloFin:
             response = await execute_with_timeout(
                 self._get_positions_api, timeout=5, inst_id=symbol
             )
+            self._ensure_ok(response, f"get_positions({symbol})")
             positions = response.get("data", [])
             # print(positions)
             # quit()
@@ -205,6 +263,7 @@ class BloFin:
             tickers = await execute_with_timeout(
                 self.blofin_client.public.get_tickers, timeout=5, inst_id=symbol
             )
+            self._ensure_ok(tickers, f"get_tickers({symbol})")
             ticker_data = self._extract_ticker_data(tickers)
 
             # Fallback for symbols normalized with 1000 prefix when BloFin expects spot-style base.
@@ -219,6 +278,7 @@ class BloFin:
                         timeout=5,
                         inst_id=fallback_symbol,
                     )
+                    self._ensure_ok(tickers, f"get_tickers({fallback_symbol})")
                     ticker_data = self._extract_ticker_data(tickers)
                     symbol = fallback_symbol
 
@@ -259,6 +319,7 @@ class BloFin:
                 timeout=5,
                 inst_type="SWAP",
             )
+            self._ensure_ok(instruments, "get_instruments(SWAP)")
             for instrument in instruments["data"]:
                 if instrument["instId"] == symbol:
                     # print(f"Symbol: {symbol} -> {instrument}")
@@ -334,6 +395,7 @@ class BloFin:
                 margin_mode=margin_mode,
                 clientOrderId=client_order_id,
             )
+            self._ensure_ok(order, f"place_order(limit,{symbol})")
             print(f"{self.log_prefix} Limit Order Placed: {order}")
             # Limit Order Placed: {'code': '0', 'msg': '', 'data': [{'orderId': '1000012973229', 'clientOrderId': '20241014022135830998', 'msg': 'success', 'code': '0'}]}
         except Exception as e:
@@ -369,34 +431,45 @@ class BloFin:
                 if scale_lot_size
                 else size
             )
+
+            lots = sanitize_lots(
+                lots,
+                lot_size,
+                min_lots,
+                allow_below_min_to_zero=not scale_lot_size,
+                rounding="nearest" if scale_lot_size else "down",
+            )
+            if lots == 0:
+                print(f"{self.log_prefix} Skipping {symbol} {side} order: size below minimum/step.")
+                return None
             print(
                 f"{self.log_prefix} Processing {lots} lots of {symbol} with market order"
             )
 
             # Check if order size exceeds maximum order quantity
-            if lots > max_size:
+            max_chunk = sanitize_lots(max_size, lot_size, min_lots, rounding="down")
+            if max_chunk <= 0:
+                print(f"{self.log_prefix} Invalid max order qty for {symbol}: {max_size}")
+                return None
+
+            if lots > max_chunk:
                 print(
-                    f"{self.log_prefix} Order size {lots} exceeds max order qty {max_size}. Splitting into chunks."
+                    f"{self.log_prefix} Order size {lots} exceeds max order qty {max_chunk}. Splitting into chunks."
                 )
 
                 # Calculate number of full chunks and remainder
-                num_full_chunks = int(lots // max_size)
-                remainder = lots % max_size
-
-                # Round remainder to lot size precision
-                decimal_places = (
-                    len(str(lot_size).rsplit(".", maxsplit=1)[-1])
-                    if "." in str(lot_size)
-                    else 0
-                )
-                remainder = float(f"%.{decimal_places}f" % remainder)
+                num_full_chunks = int(lots // max_chunk)
+                remainder = lots - (num_full_chunks * max_chunk)
+                if remainder < 0:
+                    remainder = 0.0
+                remainder = sanitize_lots(remainder, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
 
                 orders = []
                 total_executed = 0
 
                 # Place full-sized chunks
                 for i in range(num_full_chunks):
-                    chunk_size = max_size
+                    chunk_size = max_chunk
                     print(
                         f"{self.log_prefix} Placing chunk {i + 1}/{num_full_chunks + (1 if remainder > 0 else 0)}: {chunk_size} lots"
                     )
@@ -417,6 +490,7 @@ class BloFin:
                         margin_mode=margin_mode,
                         clientOrderId=client_order_id,
                     )
+                    self._ensure_ok(order, f"place_order(market-chunk,{symbol})")
                     orders.append(order)
                     total_executed += chunk_size
                     print(f"{self.log_prefix} Chunk order placed: {order}")
@@ -443,6 +517,7 @@ class BloFin:
                         margin_mode=margin_mode,
                         clientOrderId=client_order_id,
                     )
+                    self._ensure_ok(order, f"place_order(market-final,{symbol})")
                     orders.append(order)
                     total_executed += remainder
                     print(f"{self.log_prefix} Final chunk order placed: {order}")
@@ -470,6 +545,7 @@ class BloFin:
                     margin_mode=margin_mode,
                     clientOrderId=client_order_id,
                 )
+                self._ensure_ok(order, f"place_order(market,{symbol})")
                 print(f"{self.log_prefix} Market Order Placed: {order}")
                 return order
 
@@ -499,6 +575,13 @@ class BloFin:
             )
 
             # Place a market order in the opposite direction to close the position
+            if self.copy_trading:
+                lot_size, min_lots, _, _, _ = await self.get_symbol_details(symbol)
+                size = sanitize_lots(size, lot_size, min_lots, rounding="down")
+                if size == 0:
+                    print(f"{self.log_prefix} Skipping close for {symbol}: size below minimum/step.")
+                    return None
+
             client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
             order = await self._close_positions(
                 symbol=symbol,
@@ -571,14 +654,24 @@ class BloFin:
                 side = "sell" if current_size > 0 else "buy"
 
                 if self.copy_trading:
-                    client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-                    await self._close_positions(
-                        symbol=symbol,
-                        margin_mode=current_margin_mode,
-                        position_side="net",
-                        client_order_id=client_order_id,
-                        size=reduction_size,
+                    reduction_size = sanitize_lots(
+                        reduction_size,
+                        lot_size,
+                        min_lots,
+                        allow_below_min_to_zero=True,
+                        rounding="down",
                     )
+                    if reduction_size == 0:
+                        print(f"{self.log_prefix} Skipping reduction for {symbol}: size below minimum/step.")
+                    else:
+                        client_order_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                        await self._close_positions(
+                            symbol=symbol,
+                            margin_mode=current_margin_mode,
+                            position_side="net",
+                            client_order_id=client_order_id,
+                            size=reduction_size,
+                        )
                 else:
                     # Standard futures endpoint does not support partial size on close_positions.
                     # Reduce by sending the opposite market order in net mode.
@@ -623,12 +716,7 @@ class BloFin:
 
             # Calculate the remaining size difference after any position closure
             # Format to required decimal places and convert back to float
-            decimal_places = (
-                len(str(lot_size).rsplit(".", maxsplit=1)[-1])
-                if "." in str(lot_size)
-                else 0
-            )
-            size_diff = float(f"%.{decimal_places}f" % (size - current_size))
+            size_diff = sanitize_lots(size - current_size, lot_size, min_lots, allow_below_min_to_zero=True, rounding="down")
 
             # Tolerance logic to prevent unnecessary trades:
             # 1. If closing position (target=0): only skip if already below tradable minimum (current < min_lots)
@@ -733,16 +821,20 @@ class BloFin:
             return f"{base}-USDT"
         return signal_symbol
 
-    async def fetch_initial_account_value(self) -> float:
+    async def fetch_initial_account_value(self) -> float | None:
         """Calculate total account value from balance and initial margin of positions."""
         try:
             # Get available balance
             balance = await self.fetch_balance("USDT")
-            available_balance = float(balance) if balance else 0.0
+            if balance is None:
+                return None
+            available_balance = float(balance)
             print(f"{self.log_prefix} Available Balance: {available_balance} USDT")
 
             # Get positions directly - BloFin provides margin directly
             positions = await self.fetch_all_open_positions()
+            if positions is None:
+                return None
             position_margin = 0.0
             if positions and "data" in positions:
                 for pos in positions["data"]:
@@ -757,7 +849,7 @@ class BloFin:
             print(
                 f"{self.log_prefix} Error calculating initial account value: {str(e)}"
             )
-            return 0.0
+            return None
 
 
 async def main():
