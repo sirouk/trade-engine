@@ -488,11 +488,25 @@ class TradeExecutor:
                     tasks.append(task)
                 
                 # Wait for all positions to be set to zero in parallel
-                await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
                 
+                # Treat the disabled account update as atomic: only confirm cache when all
+                # closes succeeded. Any failed call leaves cache unchanged for retry.
+                errors = [r for r in results if isinstance(r, Exception)]
+                failed = [r for r in results if r is False]
+                account_success = (not errors) and (not failed)
+
                 # Update cache after setting all positions to zero
-                await self.signal_manager.confirm_execution(account_key, True)
-                return True, None  # Return True since we successfully set positions to zero
+                await self.signal_manager.confirm_execution(account_key, account_success)
+                if account_success:
+                    logger.info(f"{account_key}: disabled account positions closed successfully")
+                    return True, None  # Return True since we successfully set positions to zero
+
+                logger.warning(
+                    f"{account_key}: disabled account close had {len(errors)} errors and "
+                    f"{len(failed)} failed results"
+                )
+                return False, f"{account_key} had disabled-close failures"
                 
             # Get total account value (including positions)
             total_value = await account.fetch_initial_account_value()
