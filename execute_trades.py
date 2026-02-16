@@ -14,6 +14,7 @@ from account_processors.blofin_processor import BloFin
 from account_processors.kucoin_processor import KuCoin
 from account_processors.mexc_processor import MEXC
 from account_processors.ccxt_processor import CCXTProcessor
+from account_processors.hyperliquid_processor import HyperliquidProcessor
 
 from core.signal_manager import SignalManager
 from config.credentials import load_ccxt_credentials
@@ -117,9 +118,14 @@ class TradeExecutor:
             if ccxt_credentials.ccxt_list:
                 for ccxt_cred in ccxt_credentials.ccxt_list:
                     if ccxt_cred.enabled:
-                        ccxt_processor = CCXTProcessor(ccxt_credentials=ccxt_cred)
-                        self.accounts.append(ccxt_processor)
-                        logger.info(f"Added CCXT exchange: {ccxt_cred.exchange_name}")
+                        if ccxt_cred.exchange_name.lower() == "hyperliquid":
+                            account_processor = HyperliquidProcessor(ccxt_credentials=ccxt_cred)
+                            self.accounts.append(account_processor)
+                            logger.info(f"Added Hyperliquid exchange: {ccxt_cred.exchange_name}")
+                        else:
+                            ccxt_processor = CCXTProcessor(ccxt_credentials=ccxt_cred)
+                            self.accounts.append(ccxt_processor)
+                            logger.info(f"Added CCXT exchange: {ccxt_cred.exchange_name}")
         except ValueError:
             # No CCXT exchanges configured
             logger.info("No CCXT exchanges configured")

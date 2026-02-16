@@ -331,15 +331,29 @@ def ensure_ccxt_credentials(credentials: Credentials, skip_prompt: bool = False)
     )
     
     # Get API credentials
-    api_key = input(f"Enter your {exchange_name} API key: ").strip()
+    is_hyperliquid = exchange_name.lower() == "hyperliquid"
+    api_key_label = "wallet address" if is_hyperliquid else "API key"
+    api_secret_label = "private key" if is_hyperliquid else "API secret"
+    api_passphrase_label = (
+        "agent wallet address (optional)"
+        if is_hyperliquid
+        else "API passphrase"
+    )
+    
+    api_key = input(f"Enter your {exchange_name} {api_key_label}: ").strip()
     new_ccxt_cred.api_key = api_key
     
-    api_secret = input(f"Enter your {exchange_name} API secret: ").strip()
+    api_secret = input(f"Enter your {exchange_name} {api_secret_label}: ").strip()
     new_ccxt_cred.api_secret = api_secret
     
-    # Always ask for passphrase - many exchanges use it
-    # Users can press Enter to skip if not needed
-    passphrase = input(f"Enter your {exchange_name} API passphrase (press Enter if not required): ").strip()
+    # Always ask for passphrase - many exchanges use it.
+    # For Hyperliquid this is commonly used as an optional agent wallet/sub-account address.
+    passphrase_prompt = (
+        f"Enter your {exchange_name} {api_passphrase_label}: "
+        if is_hyperliquid
+        else f"Enter your {exchange_name} API passphrase (press Enter if not required): "
+    )
+    passphrase = input(passphrase_prompt).strip()
     new_ccxt_cred.api_passphrase = passphrase
     
     # Leverage override
