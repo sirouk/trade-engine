@@ -1,7 +1,7 @@
 import asyncio
 import datetime
 from pymexc import futures
-from config.credentials import load_mexc_credentials
+from config.credentials import load_mexc_credentials, default_min_order_notional_for_exchange
 from core.utils.modifiers import scale_size_and_price, sanitize_lots
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
@@ -38,6 +38,46 @@ class MEXC:
         self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()}
 
         self.leverage_override = self.credentials.mexc.leverage_override
+        self.min_order_notional_usd = float(
+            self.credentials.mexc.min_order_notional_usd
+            if getattr(self.credentials.mexc, "min_order_notional_usd", 0) > 0
+            else default_min_order_notional_for_exchange("mexc")
+        )
+
+    async def _estimate_order_notional(self, symbol: str, size: float, contract_value: float) -> float:
+        if self.min_order_notional_usd <= 0 or not size:
+            return 0.0
+
+        ticker = await self.fetch_tickers(symbol)
+        if not ticker:
+            return 0.0
+
+        price = 0.0
+        for field in ("last", "bid", "ask"):
+            try:
+                price = float(getattr(ticker, field, 0))
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                break
+
+        if price <= 0:
+            return 0.0
+
+        if contract_value is None or contract_value == 0:
+            contract_value = 1.0
+
+        return abs(float(size)) * price * float(contract_value)
+
+    async def _is_tiny_order_update(self, symbol: str, size: float, contract_value: float) -> bool:
+        if self.min_order_notional_usd <= 0 or not size:
+            return False
+
+        estimated_notional = await self._estimate_order_notional(symbol, size, contract_value)
+        if not estimated_notional:
+            return False
+
+        return estimated_notional < self.min_order_notional_usd
 
     async def fetch_balance(self, instrument="USDT"):
         """Fetch the futures account balance for a specific instrument."""
@@ -478,6 +518,17 @@ class MEXC:
                 if abs(size_diff) < position_tolerance:
                     print(f"{self.log_prefix} Position for {symbol} is already at target size (current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}, tolerance={position_tolerance:.6f}).")
                     return
+
+            if size != 0 and await self._is_tiny_order_update(
+                symbol,
+                size_diff,
+                contract_value,
+            ):
+                print(
+                    f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
+                    f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
+                )
+                return
             
             print(f"{self.log_prefix} Adjusting position: current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}")
 

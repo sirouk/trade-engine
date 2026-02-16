@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import os
 from blofin import BloFinClient  # https://github.com/nomeida/blofin-python
-from config.credentials import load_blofin_credentials
+from config.credentials import load_blofin_credentials, default_min_order_notional_for_exchange
 from core.utils.blofin_http import (
     patch_blofin_cloudflare_transport,
     verify_patch_working,
@@ -72,6 +72,11 @@ class BloFin:
         }  # unusued as they are not needed
 
         self.leverage_override = self.credentials.blofin.leverage_override
+        self.min_order_notional_usd = float(
+            self.credentials.blofin.min_order_notional_usd
+            if getattr(self.credentials.blofin, "min_order_notional_usd", 0) > 0
+            else default_min_order_notional_for_exchange("blofin")
+        )
 
         print(
             f"{self.log_prefix} Using {'copy trading' if self.copy_trading else 'futures'} trading endpoints."
@@ -98,6 +103,41 @@ class BloFin:
             if self.copy_trading
             else self.blofin_client.trading.set_leverage
         )
+
+    async def _estimate_order_notional(self, symbol: str, size: float, contract_value: float) -> float:
+        if self.min_order_notional_usd <= 0 or not size:
+            return 0.0
+
+        ticker = await self.fetch_tickers(symbol)
+        if not ticker:
+            return 0.0
+
+        price = 0.0
+        for field in ("last", "bid", "ask"):
+            try:
+                price = float(getattr(ticker, field, 0))
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                break
+
+        if price <= 0:
+            return 0.0
+
+        if contract_value is None or contract_value == 0:
+            contract_value = 1.0
+
+        return abs(float(size)) * price * float(contract_value)
+
+    async def _is_tiny_order_update(self, symbol: str, size: float, contract_value: float) -> bool:
+        if self.min_order_notional_usd <= 0 or not size:
+            return False
+
+        estimated_notional = await self._estimate_order_notional(symbol, size, contract_value)
+        if not estimated_notional:
+            return False
+
+        return estimated_notional < self.min_order_notional_usd
         self._close_positions_api = (
             self.blofin_client.trading.close_positions_ct
             if self.copy_trading
@@ -746,6 +786,17 @@ class BloFin:
                         f"{self.log_prefix} Position for {symbol} is already at target size (current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}, tolerance={position_tolerance:.6f})."
                     )
                     return
+
+            if size != 0 and await self._is_tiny_order_update(
+                symbol,
+                size_diff,
+                contract_value,
+            ):
+                print(
+                    f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
+                    f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
+                )
+                return
 
             print(
                 f"{self.log_prefix} Adjusting position: current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}"

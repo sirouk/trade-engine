@@ -21,6 +21,27 @@ class SignalManager:
         return str(account_name).strip().lower()
 
     @staticmethod
+    def _compose_account_key(exchange_name, account_name=None):
+        """
+        Build a stable account key that stays unique across duplicate exchange entries.
+
+        - Default behavior keeps legacy keys (exchange_name) when account label matches
+          the exchange label.
+        - For explicit multi-account setups, include account label as a suffix.
+        """
+        exchange = str(exchange_name or "").strip()
+        label = str(account_name or "").strip()
+        if not exchange and not label:
+            return ""
+        if not label:
+            label = exchange
+        if not exchange:
+            return label
+        if SignalManager._canonical_account_name(label) == SignalManager._canonical_account_name(exchange):
+            return exchange
+        return f"{exchange}::{label}"
+
+    @staticmethod
     def _merge_depth_maps(base: Dict, incoming: Dict) -> Dict:
         """
         Merge per-symbol depth maps.
@@ -40,6 +61,30 @@ class SignalManager:
             except (TypeError, ValueError):
                 merged[symbol] = value
         return merged
+
+    @staticmethod
+    def _resolve_account_name(account) -> str:
+        """Resolve an account key from processor metadata."""
+        if not account:
+            return ""
+        return str(getattr(account, "account_name", None) or getattr(account, "exchange_name", ""))
+
+    @staticmethod
+    def _scoped_keys_for_exchange(candidates: Dict, exchange_name: str):
+        """Return scoped keys for the given exchange in candidate order."""
+        exchange = SignalManager._canonical_account_name(exchange_name)
+        if not exchange:
+            return []
+
+        scoped = []
+        for candidate in candidates.keys():
+            candidate_str = str(candidate)
+            if "::" not in candidate_str:
+                continue
+            candidate_exchange = candidate_str.partition("::")[0]
+            if SignalManager._canonical_account_name(candidate_exchange) == exchange:
+                scoped.append(candidate)
+        return scoped
     
     def __init__(self):
         self.signal_processors = {}  # {source_name: processor_instance}
@@ -128,10 +173,66 @@ class SignalManager:
         if account_name in candidates:
             return account_name
 
+        if not account_name:
+            return None
+
         canonical = self._canonical_account_name(account_name)
         for key in candidates.keys():
             if self._canonical_account_name(key) == canonical:
                 return key
+
+        # Prefer explicit exchange-scoped keys (`exchange::label`) for duplicate accounts.
+        if "::" in str(account_name):
+            account_exchange = self._canonical_account_name(str(account_name).partition("::")[0])
+            _, _, account_label = str(account_name).partition("::")
+            account_label = self._canonical_account_name(account_label)
+            scoped_keys = self._scoped_keys_for_exchange(candidates, account_exchange)
+
+            # Exact scoped label match for this exchange.
+            for key in scoped_keys:
+                _, _, candidate_label = str(key).partition("::")
+                if self._canonical_account_name(candidate_label) == account_label:
+                    return key
+
+            # If ambiguous scoped matching exists for this exchange, do not auto-map to a
+            # different label. If there is only one scoped key, map to it.
+            if len(scoped_keys) == 1:
+                return scoped_keys[0]
+
+            if len(scoped_keys) > 1:
+                return None
+
+            # Legacy compatibility:
+            # if a running account key is "exchange::label" and cache currently
+            # uses only "exchange", resolve to the exchange-only cache key.
+            if len(scoped_keys) == 0:
+                for key in candidates.keys():
+                    if self._canonical_account_name(key) == account_exchange and "::" not in str(key):
+                        return key
+
+            # Older mixed formats keyed only by account label.
+            if len(scoped_keys) == 0:
+                for key in candidates.keys():
+                    if self._canonical_account_name(key) == account_label and "::" not in str(key):
+                        return key
+
+            return None
+
+        account_exchange = self._canonical_account_name(account_name)
+        scoped_keys = self._scoped_keys_for_exchange(candidates, account_exchange)
+
+        # A single scoped key can be treated as the exchange-level target when
+        # resolving legacy exchange-only keys.
+        if len(scoped_keys) == 1:
+            return scoped_keys[0]
+
+        # If multiple scoped keys exist, avoid aliasing to prevent collisions.
+        if len(scoped_keys) > 1:
+            for key in candidates.keys():
+                if self._canonical_account_name(key) == account_exchange and "::" not in str(key):
+                    return key
+            return None
+
         return None
     
     def _should_reload_asset_mapping(self) -> bool:
@@ -174,17 +275,46 @@ class SignalManager:
         # Build canonical account registry from active processors.
         account_by_canonical = {}
         for account in accounts_to_check:
-            canonical = self._canonical_account_name(account.exchange_name)
+            exchange_name = getattr(account, "exchange_name", "")
+            account_name = self._resolve_account_name(account)
+            account_key = self._compose_account_key(exchange_name, account_name)
+            canonical = self._canonical_account_name(account_key)
             existing = account_by_canonical.get(canonical)
             # Prefer enabled account if both canonical names appear.
             if existing is None or (not getattr(existing, "enabled", False) and getattr(account, "enabled", False)):
                 account_by_canonical[canonical] = account
 
+        # Build exchange->accounts index for legacy cache key recovery.
+        exchange_to_canonical_accounts = {}
+        for canonical in account_by_canonical.keys():
+            exchange = canonical.split("::", 1)[0]
+            exchange_to_canonical_accounts.setdefault(exchange, []).append(canonical)
+
         # Canonicalize/merge cache keys to avoid duplicates like "BloFin" vs "blofin".
         cache_by_canonical = {}
         cache_aliases = {}
         for raw_name, raw_depths in (self.account_asset_depths or {}).items():
-            canonical = self._canonical_account_name(raw_name)
+            raw_name_str = str(raw_name)
+            canonical = self._canonical_account_name(raw_name_str)
+
+            # If cache still uses legacy exchange-only keys (for example Hyperliquid),
+            # map it to the active account key for that exchange to avoid phantom
+            # updates when migrating to labeled duplicate accounts.
+            if "::" not in raw_name_str:
+                exchange = self._canonical_account_name(raw_name_str)
+                exchange_accounts = exchange_to_canonical_accounts.get(exchange, [])
+                if len(exchange_accounts) == 1:
+                    canonical = exchange_accounts[0]
+                elif len(exchange_accounts) > 1:
+                    # Keep legacy keys untouched when an exchange now has multiple
+                    # scoped accounts to avoid cross-account contamination.
+                    cache_aliases.setdefault(canonical, set()).add(raw_name)
+                    cache_by_canonical[canonical] = self._merge_depth_maps(
+                        cache_by_canonical.get(canonical, {}),
+                        raw_depths if isinstance(raw_depths, dict) else {},
+                    )
+                    continue
+
             cache_aliases.setdefault(canonical, set()).add(raw_name)
             cache_by_canonical[canonical] = self._merge_depth_maps(
                 cache_by_canonical.get(canonical, {}),
@@ -199,7 +329,9 @@ class SignalManager:
         for canonical in all_canonical_accounts:
             account = account_by_canonical.get(canonical)
             if account is not None:
-                display = account.exchange_name
+                exchange_name = getattr(account, "exchange_name", "")
+                account_name = self._resolve_account_name(account)
+                display = self._compose_account_key(exchange_name, account_name)
             else:
                 # Keep an existing cache alias when no active processor exists.
                 aliases = sorted(cache_aliases.get(canonical, {canonical}))
@@ -359,6 +491,18 @@ class SignalManager:
                     async with self._cache_lock:
                         current_cache = self._load_cache()
                         canonical = self._canonical_account_name(resolved_name)
+
+                        # Remove stale legacy exchange-only aliases after migration to
+                        # exchange::label keys.
+                        if "::" in resolved_name:
+                            resolved_exchange = self._canonical_account_name(
+                                str(resolved_name).partition("::")[0]
+                            )
+                            for key in list(current_cache.keys()):
+                                key_name = self._canonical_account_name(key)
+                                if "::" not in key_name and self._canonical_account_name(key_name) == resolved_exchange:
+                                    current_cache.pop(key, None)
+
                         # Remove stale aliases for same account key (e.g., BloFin vs blofin).
                         for key in list(current_cache.keys()):
                             if self._canonical_account_name(key) == canonical:
@@ -385,6 +529,14 @@ class SignalManager:
             for key in list(current_cache.keys()):
                 if self._canonical_account_name(key) == canonical:
                     current_cache.pop(key, None)
+
+            if "::" in resolved_name:
+                resolved_exchange = self._canonical_account_name(str(resolved_name).partition("::")[0])
+                for key in list(current_cache.keys()):
+                    key_name = self._canonical_account_name(key)
+                    if "::" not in key_name and key_name == resolved_exchange:
+                        current_cache.pop(key, None)
+
             current_cache[resolved_name] = self._temp_depths[resolved_name]
             self.account_asset_depths = current_cache
             await self._save_cache()

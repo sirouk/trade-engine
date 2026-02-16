@@ -71,7 +71,16 @@ class HyperliquidProcessor(CCXTProcessor):
 
         # Normalize identity for clarity in logs and execution.
         self.exchange_name = "Hyperliquid"
-        self.log_prefix = f"[{self.exchange_name}]"
+        self.account_name = (getattr(self.credentials, "account_name", "") or self.exchange_name).strip() or self.exchange_name
+        if str(self.account_name).strip().lower() == str(self.exchange_name).strip().lower():
+            self.log_prefix = f"[{self.exchange_name}]"
+        else:
+            self.log_prefix = f"[{self.exchange_name}:{self.account_name}]"
+
+        # Hyperliquid enforces a minimum order notional (commonly $10). Keep this at the
+        # account-level so each wallet can override if needed.
+        configured_min_notional = float(getattr(self.credentials, "min_order_notional_usd", 0.0) or 0.0)
+        self.min_order_notional_usd = configured_min_notional if configured_min_notional > 0 else 10.0
 
         # Conservative request concurrency for perps routing + signing operations.
         self.MAX_CONCURRENT_SYMBOL_REQUESTS = 3
@@ -136,6 +145,21 @@ class HyperliquidProcessor(CCXTProcessor):
             or "max builder fee" in message
             or "builder not approved" in message
         )
+
+    async def _estimate_order_notional(
+        self,
+        symbol: str,
+        size: float,
+        contract_value: float,
+    ) -> float:
+        if self.min_order_notional_usd <= 0 or not size:
+            return 0.0
+        price = await self._get_market_reference_price(symbol)
+        if not price:
+            return 0.0
+        if contract_value is None:
+            contract_value = 1.0
+        return abs(float(size)) * float(price) * float(contract_value)
 
     async def _get_market_reference_price(self, symbol: str) -> float | None:
         """
@@ -803,6 +827,17 @@ class HyperliquidProcessor(CCXTProcessor):
             side = "buy" if size_diff > 0 else "sell"
             size_diff = abs(size_diff)
             if size_diff <= 0:
+                return
+
+            if await self._is_tiny_order_update(
+                symbol,
+                size_diff,
+                contract_value,
+            ):
+                print(
+                    f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
+                    f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
+                )
                 return
 
             await self.open_market_position(

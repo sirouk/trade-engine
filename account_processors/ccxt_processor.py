@@ -23,6 +23,11 @@ from config.credentials import CCXTCredentials
 
 
 class CCXTProcessor:
+    EXCHANGE_DEFAULT_MIN_NOTIONAL = {
+        "hyperliquid": 10.0,
+        "bybit": 5.0,
+    }
+
     def __init__(self, ccxt_credentials: CCXTCredentials = None, exchange_name: str = None):
         """
         Initialize CCXT processor for any supported exchange.
@@ -91,9 +96,81 @@ class CCXTProcessor:
         self.inverse_margin_mode_map = {v: k for k, v in self.margin_mode_map.items()}
         
         self.leverage_override = self.credentials.leverage_override
+        configured_min_notional = float(getattr(self.credentials, "min_order_notional_usd", 0.0) or 0.0)
+        self.min_order_notional_usd = (
+            configured_min_notional
+            if configured_min_notional > 0
+            else self.EXCHANGE_DEFAULT_MIN_NOTIONAL.get(self.exchange_name.strip().lower(), 0.0)
+        )
+
+        # Distinguish duplicate CCXT accounts (e.g., multiple Hyperliquid wallets).
+        self.account_name = (getattr(self.credentials, "account_name", "") or self.exchange_name).strip()
+        if not self.account_name:
+            self.account_name = self.exchange_name
 
         # Add logger prefix
-        self.log_prefix = f"[{self.exchange_name.upper()}]"
+        if str(self.account_name).strip().lower() == str(self.exchange_name).strip().lower():
+            self.log_prefix = f"[{self.exchange_name.upper()}]"
+        else:
+            self.log_prefix = f"[{self.exchange_name.upper()}:{self.account_name}]"
+
+    async def _estimate_order_notional(
+        self,
+        symbol: str,
+        size: float,
+        contract_value: float,
+    ) -> float:
+        """
+        Return estimated order notional (in USDC/USDT terms) for a size update.
+        """
+        if self.min_order_notional_usd <= 0 or not size:
+            return 0.0
+        if contract_value is None:
+            contract_value = 1.0
+        try:
+            ticker = await self.fetch_tickers(symbol)
+            if not ticker:
+                return 0.0
+        except Exception:
+            return 0.0
+
+        candidates = [
+            getattr(ticker, "last", 0),
+            getattr(ticker, "close", 0),
+            getattr(ticker, "markPrice", 0),
+            getattr(ticker, "indexPrice", 0),
+            getattr(ticker, "bid", 0),
+            getattr(ticker, "ask", 0),
+        ]
+        price = 0.0
+        for candidate in candidates:
+            try:
+                price = float(candidate)
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                break
+        if price <= 0:
+            return 0.0
+
+        return abs(float(size)) * price * float(contract_value)
+
+    async def _is_tiny_order_update(
+        self,
+        symbol: str,
+        size: float,
+        contract_value: float,
+    ) -> bool:
+        """
+        Return True when the requested adjustment is below the account's configured
+        minimum notional and should be skipped to prevent repeated fail loops.
+        """
+        if self.min_order_notional_usd <= 0 or not size:
+            return False
+        estimated_notional = await self._estimate_order_notional(symbol, size, contract_value)
+        if not estimated_notional:
+            return False
+        return estimated_notional < self.min_order_notional_usd
 
     @staticmethod
     def get_exchange_class(exchange_name: str):
@@ -643,6 +720,17 @@ class CCXTProcessor:
                 
                 if abs(size_diff) < position_tolerance:
                     return
+
+            if size != 0 and await self._is_tiny_order_update(
+                symbol,
+                size_diff,
+                contract_value,
+            ):
+                print(
+                    f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
+                    f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
+                )
+                return
 
             # Determine the side of the new order
             side = "buy" if size_diff > 0 else "sell"
