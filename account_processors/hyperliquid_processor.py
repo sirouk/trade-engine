@@ -15,6 +15,7 @@ from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
 from core.utils.modifiers import scale_size_and_price, sanitize_lots
+from core.utils.order_retry_guard import is_risk_reducing_adjustment
 
 
 class HyperliquidProcessor(CCXTProcessor):
@@ -735,8 +736,7 @@ class HyperliquidProcessor(CCXTProcessor):
                 scale_lot_size=False,
             )
         except Exception as e:
-            print(f"{self.log_prefix} Error closing position: {str(e)}")
-            return None
+            raise RuntimeError(f"{self.log_prefix} Error closing position for {symbol}: {e}") from e
 
     async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
         """
@@ -769,16 +769,7 @@ class HyperliquidProcessor(CCXTProcessor):
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
                 close_result = await self.close_position(symbol)
                 if close_result is None:
-                    close_side = "sell" if current_size > 0 else "buy"
-                    flip_amount = abs(current_size) + abs(size)
-                    await self.open_market_position(
-                        symbol=symbol,
-                        side=close_side,
-                        size=flip_amount,
-                        leverage=leverage,
-                        margin_mode=margin_mode,
-                        scale_lot_size=False,
-                    )
+                    print(f"{self.log_prefix} No close order needed for {symbol}; proceeding with fresh target open.")
                 current_size = 0
 
             if current_size != 0 and size != 0 and current_margin_mode != margin_mode:
@@ -791,7 +782,12 @@ class HyperliquidProcessor(CCXTProcessor):
                         params=self._build_user_params(),
                     )
                 except Exception:
-                    await self.close_position(symbol)
+                    close_result = await self.close_position(symbol)
+                    if close_result is None:
+                        print(
+                            f"{self.log_prefix} Margin-mode recovery close for {symbol} returned no order; "
+                            "continuing as flat."
+                        )
                     current_size = 0
 
             if current_leverage != leverage and abs(size) > 0:
@@ -816,18 +812,21 @@ class HyperliquidProcessor(CCXTProcessor):
 
             if size == 0:
                 if abs(current_size) < min_lots:
-                    return
+                    self._record_order_success(symbol)
+                    return True
             elif abs(current_size) == 0:
                 pass
             else:
                 position_tolerance = max(lot_size, min(abs(current_size), abs(size)) * 0.001)
                 if abs(size_diff) < position_tolerance:
-                    return
+                    self._record_order_success(symbol)
+                    return True
 
             side = "buy" if size_diff > 0 else "sell"
             size_diff = abs(size_diff)
             if size_diff <= 0:
-                return
+                self._record_order_success(symbol)
+                return True
 
             if await self._is_tiny_order_update(
                 symbol,
@@ -838,9 +837,13 @@ class HyperliquidProcessor(CCXTProcessor):
                     f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
                     f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
                 )
-                return
+                self._record_order_success(symbol)
+                return True
 
-            await self.open_market_position(
+            if not is_risk_reducing_adjustment(current_size, size) and not self._can_attempt_order(symbol):
+                return False
+
+            order_result = await self.open_market_position(
                 symbol=symbol,
                 side=side,
                 size=size_diff,
@@ -848,9 +851,14 @@ class HyperliquidProcessor(CCXTProcessor):
                 margin_mode=margin_mode,
                 scale_lot_size=False,
             )
+            if order_result is None:
+                raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
+            self._record_order_success(symbol)
+            return True
         except Exception as e:
+            self._record_order_failure(symbol, e)
             print(f"{self.log_prefix} Error reconciling position: {str(e)}")
-            return
+            return False
 
     def map_signal_symbol_to_exchange(self, signal_symbol: str) -> str:
         """

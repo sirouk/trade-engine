@@ -297,44 +297,25 @@ class TradeExecutor:
         normalized_key = self._normalize_account_key(account_key)
         return self._account_retry_state.setdefault(
             normalized_key,
-            {"failures": 0, "next_retry_at": 0.0},
+            {"failures": 0},
         )
 
-    def _get_next_retry_delay(self, account_keys: List[str]) -> float | None:
-        """Return the next positive retry delay across the provided account keys."""
-        now = time.time()
-        delay = None
-        for key in account_keys:
-            state = self._get_retry_state(key)
-            retry_delay = state["next_retry_at"] - now
-            if retry_delay > 0:
-                if delay is None or retry_delay < delay:
-                    delay = retry_delay
-        return delay
-
-    def _can_retry_account_now(self, account_key: str) -> bool:
-        """Return whether an account is allowed to retry after prior failures."""
-        state = self._get_retry_state(account_key)
-        return time.time() >= state["next_retry_at"]
-
     def _record_account_success(self, account_key: str):
-        """Reset account retry state after a successful execution."""
+        """Reset account failure count after a successful execution."""
         state = self._get_retry_state(account_key)
         state["failures"] = 0
-        state["next_retry_at"] = 0.0
 
     def _record_account_failure(self, account_key: str, error_msg: str | None = None):
         """
-        Record failure and push next retry time with exponential backoff.
+        Record account failure count with exponential delay metadata for logging.
 
-        This avoids immediate reprocessing loops on transient endpoint errors.
+        Accounts are still retried each cycle; delay is informational only.
         """
         state = self._get_retry_state(account_key)
         state["failures"] += 1
         delay = self.FAILURE_RETRY_BASE_SECONDS * (2 ** min(state["failures"] - 1, 10))
         if delay > self.FAILURE_RETRY_MAX_SECONDS:
             delay = self.FAILURE_RETRY_MAX_SECONDS
-        state["next_retry_at"] = time.time() + delay
         if error_msg:
             logger.warning(
                 f"{account_key}: execution failed, retry in {delay:.1f}s (failures={state['failures']})"
@@ -413,12 +394,15 @@ class TradeExecutor:
                       f"Max Size: {max_size}")
 
             # Let reconcile_position handle the quantity precision
-            await account.reconcile_position(
+            reconcile_result = await account.reconcile_position(
                 symbol=exchange_symbol,
                 size=quantity,
                 leverage=leverage,
                 margin_mode="isolated"
             )
+            if reconcile_result is False:
+                logger.warning(f"{account_key} reconcile_position reported failure for {exchange_symbol}")
+                return False
             
             return True
             
@@ -591,8 +575,7 @@ class TradeExecutor:
             # Load weight config ONCE before processing accounts (prevents race condition)
             self._load_weight_config()
             
-            updates = self.signal_manager.check_for_updates(self.accounts)
-            #logger.info(f"Checking for updates: {updates}")
+            self.signal_manager.check_for_updates(self.accounts)
 
             account_updates = {
                 self._get_account_key(account): self.signal_manager.get_changed_symbols(
@@ -620,35 +603,14 @@ class TradeExecutor:
             
             # Process all accounts concurrently
             tasks: List[Tuple[str, asyncio.Task]] = []
-            accounts_skipped_for_backoff = 0
-            skipped_account_keys: List[str] = []
             for account in self.accounts:
                 account_key = self._get_account_key(account)
                 if not account_updates.get(account_key):
-                    continue
-                if not self._can_retry_account_now(account_key):
-                    accounts_skipped_for_backoff += 1
-                    skipped_account_keys.append(account_key)
                     continue
                 task = asyncio.create_task(
                     self.process_account(account, signals)
                 )
                 tasks.append((account_key, task))
-
-            if not tasks and accounts_skipped_for_backoff > 0 and any(
-                bool(changed) for changed in account_updates.values()
-            ):
-                next_delay = self._get_next_retry_delay(skipped_account_keys)
-                self._next_cycle_sleep = (
-                    max(self.sleep_time, min(next_delay, self.FAILURE_RETRY_MAX_SECONDS))
-                    if next_delay is not None else self.sleep_time
-                )
-                logger.info(
-                    "No accounts are currently runnable; depth updates are temporarily paused "
-                    "due account-level retry backoff."
-                    f" Next attempt in {self._next_cycle_sleep:.2f}s."
-                )
-                return True
             
             # Wait for all account processing to complete
             results: List[Tuple[bool, str]] = await asyncio.gather(
@@ -678,17 +640,10 @@ class TradeExecutor:
                 # Note: Cache confirmation already done in process_account() line 306
 
             if failed_account_keys:
-                next_delay = self._get_next_retry_delay(failed_account_keys)
-                if next_delay is not None:
-                    logger.info(
-                        "Execution cycle had failures for "
-                        f"{', '.join(sorted(set(failed_account_keys)))}. "
-                        f"The next retry lane for these accounts opens in "
-                        f"{next_delay:.2f}s."
-                    )
-            if accounts_skipped_for_backoff > 0:
                 logger.info(
-                    "Some accounts are in retry backoff and will be retried when their lane is ready."
+                    "Execution cycle had failures for "
+                    f"{', '.join(sorted(set(failed_account_keys)))}. "
+                    "Accounts remain eligible for retry on the next cycle."
                 )
 
             # Log cycle timing

@@ -508,7 +508,6 @@ def ensure_ccxt_credentials(credentials: Credentials, skip_prompt: bool = False)
         else:
             mode = "new"
             selected_indices = []
-            selected_exchange_key = ""
 
         if mode == "new":
             print("\nCCXT supports hundreds of futures-compatible exchanges.")
@@ -602,7 +601,7 @@ def ensure_ccxt_credentials(credentials: Credentials, skip_prompt: bool = False)
             exchange_name,
             default_min_notional,
         )
-        copy_trading = input(f"Is this a copy trading account? (yes/no) [no]: ").strip().lower()
+        copy_trading = input("Is this a copy trading account? (yes/no) [no]: ").strip().lower()
         updated_cred.copy_trading = copy_trading == 'yes'
         enable = input(f"Enable {exchange_name} for trading? (yes/Enter for yes): ").strip().lower()
         updated_cred.enabled = enable != 'no'

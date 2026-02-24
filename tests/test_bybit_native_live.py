@@ -7,7 +7,6 @@ WARNING: This uses REAL money - be careful!
 import asyncio
 import sys
 import os
-from datetime import datetime
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,7 +24,7 @@ async def test_bybit_native_live():
     bybit = ByBit()
     
     try:
-        print(f"\n✅ Successfully initialized Bybit processor")
+        print("\n✅ Successfully initialized Bybit processor")
         print(f"Enabled: {bybit.enabled}")
         
         # 1. Test Balance
@@ -78,7 +77,7 @@ async def test_bybit_native_live():
         # Get ticker
         ticker = await bybit.fetch_tickers(ada_symbol)
         if ticker:
-            print(f"ADA Ticker:")
+            print("ADA Ticker:")
             print(f"  Bid: ${ticker.bid}")
             print(f"  Ask: ${ticker.ask}")
             print(f"  Last: ${ticker.last}")
@@ -88,7 +87,7 @@ async def test_bybit_native_live():
         details = await bybit.get_symbol_details(ada_symbol)
         if details:
             lot_size, min_lots, tick_size, contract_value, max_lots = details
-            print(f"\nADA Trading Details:")
+            print("\nADA Trading Details:")
             print(f"  Lot Size: {lot_size}")
             print(f"  Min Lots: {min_lots}")
             print(f"  Tick Size: ${tick_size}")
@@ -107,7 +106,7 @@ async def test_bybit_native_live():
         ada_positions = await bybit.fetch_and_map_positions(ada_symbol)
         if ada_positions:
             for pos in ada_positions:
-                print(f"Current ADA Position:")
+                print("Current ADA Position:")
                 print(f"  Size: {pos.size} ADA")
                 print(f"  Entry Price: ${pos.average_entry_price}")
                 print(f"  Leverage: {pos.leverage}x")
@@ -159,11 +158,11 @@ async def test_bybit_native_live():
         
         print("\nReady to place a test trade:")
         print(f"  Symbol: {ada_symbol}")
-        print(f"  Side: BUY (long)")
+        print("  Side: BUY (long)")
         print(f"  Size: {scaled_lots if 'scaled_lots' in locals() else 'N/A'} ADA")
         print(f"  Value: ${final_usd:.2f}" if 'final_usd' in locals() else "Value: N/A")
-        print(f"  Leverage: 1x")
-        print(f"  Margin Mode: Isolated")
+        print("  Leverage: 1x")
+        print("  Margin Mode: Isolated")
         
         confirm = input("\n⚠️  Execute this REAL trade? (type 'yes' to confirm): ").strip().lower()
         
@@ -191,7 +190,7 @@ async def test_bybit_native_live():
                     new_positions = await bybit.fetch_and_map_positions(ada_symbol)
                     if new_positions:
                         for pos in new_positions:
-                            print(f"New ADA Position:")
+                            print("New ADA Position:")
                             print(f"  Size: {pos.size} ADA")
                             print(f"  Entry Price: ${pos.average_entry_price}")
                 else:

@@ -1,4 +1,4 @@
-from pymexc import spot, futures
+from pymexc import futures
 from core.credentials import load_mexc_credentials
 
 # Load MEXC Futures API credentials from the credentials file

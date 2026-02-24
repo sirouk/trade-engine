@@ -6,9 +6,9 @@ from config.credentials import load_blofin_credentials, default_min_order_notion
 from core.utils.blofin_http import (
     patch_blofin_cloudflare_transport,
     verify_patch_working,
-    health_check,
 )
 from core.utils.modifiers import scale_size_and_price, sanitize_lots
+from core.utils.order_retry_guard import OrderRetryGuard, is_risk_reducing_adjustment
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -77,6 +77,12 @@ class BloFin:
             if getattr(self.credentials.blofin, "min_order_notional_usd", 0) > 0
             else default_min_order_notional_for_exchange("blofin")
         )
+        self.order_retry_guard = OrderRetryGuard(
+            base_delay_seconds=5.0,
+            max_delay_seconds=120.0,
+            cooldown_log_interval_seconds=15.0,
+        )
+        self.non_retriable_error_cooldown_seconds = 180.0
 
         print(
             f"{self.log_prefix} Using {'copy trading' if self.copy_trading else 'futures'} trading endpoints."
@@ -102,6 +108,11 @@ class BloFin:
             self.blofin_client.trading.set_leverage_ct
             if self.copy_trading
             else self.blofin_client.trading.set_leverage
+        )
+        self._close_positions_api = (
+            self.blofin_client.trading.close_positions_ct
+            if self.copy_trading
+            else self.blofin_client.trading.close_positions
         )
 
     async def _estimate_order_notional(self, symbol: str, size: float, contract_value: float) -> float:
@@ -138,10 +149,62 @@ class BloFin:
             return False
 
         return estimated_notional < self.min_order_notional_usd
-        self._close_positions_api = (
-            self.blofin_client.trading.close_positions_ct
-            if self.copy_trading
-            else self.blofin_client.trading.close_positions
+
+    @staticmethod
+    def _error_signature(error: Exception) -> str:
+        msg = " ".join(str(error).strip().split())
+        return msg.lower()[:256]
+
+    @staticmethod
+    def _is_non_retriable_order_error(error: Exception) -> bool:
+        msg = str(error).lower()
+        non_retriable_tokens = (
+            "insufficient balance",
+            "insufficient margin",
+            "minimum value",
+            "minimum notional",
+            "order must have minimum value",
+            "parameter size error",
+            "invalid size",
+            "risk limit",
+        )
+        return any(token in msg for token in non_retriable_tokens)
+
+    def _can_attempt_order(self, symbol: str) -> bool:
+        can_attempt, retry_in = self.order_retry_guard.can_attempt(symbol)
+        if can_attempt:
+            return True
+        should_log, suppressed = self.order_retry_guard.should_log_cooldown(symbol)
+        if should_log:
+            suppressed_note = (
+                f" ({suppressed} suppressed attempts during cooldown)"
+                if suppressed > 0
+                else ""
+            )
+            print(
+                f"{self.log_prefix} Cooldown active for {symbol}: retrying in {retry_in:.1f}s{suppressed_note}."
+            )
+        return False
+
+    def _record_order_success(self, symbol: str):
+        self.order_retry_guard.record_success(symbol)
+
+    def _record_order_failure(self, symbol: str, error: Exception):
+        signature = self._error_signature(error)
+        forced_delay = (
+            self.non_retriable_error_cooldown_seconds
+            if self._is_non_retriable_order_error(error)
+            else None
+        )
+        delay, failures = self.order_retry_guard.record_failure(
+            symbol=symbol,
+            error_signature=signature,
+            forced_delay_seconds=forced_delay,
+        )
+        classification = "non-retriable" if forced_delay is not None else "transient"
+        print(
+            f"{self.log_prefix} Order failure for {symbol} ({classification}, failures={failures}). "
+            f"Retry in {delay:.1f}s. Error: {error}"
         )
 
     def _ensure_ok(self, resp: dict, context: str):
@@ -440,6 +503,7 @@ class BloFin:
             # Limit Order Placed: {'code': '0', 'msg': '', 'data': [{'orderId': '1000012973229', 'clientOrderId': '20241014022135830998', 'msg': 'success', 'code': '0'}]}
         except Exception as e:
             print(f"{self.log_prefix} Error placing limit order: {str(e)}")
+            raise
 
     async def open_market_position(
         self,
@@ -591,6 +655,7 @@ class BloFin:
 
         except Exception as e:
             print(f"{self.log_prefix} Error placing market order: {str(e)}")
+            raise
 
     async def close_position(self, symbol: str):
         """Close the position for a specific symbol on BloFin."""
@@ -607,8 +672,6 @@ class BloFin:
             position = positions[0]
             size = float(position["positions"])  # Use the 'positions' value directly
 
-            # Determine the side based on the position size
-            side = "Sell" if size > 0 else "Buy"  # Long -> Sell, Short -> Buy
             size = abs(size)  # Negate size by using its absolute value
             print(
                 f"{self.log_prefix} Closing {size} lots of {symbol} with a market order."
@@ -636,6 +699,7 @@ class BloFin:
 
         except Exception as e:
             print(f"{self.log_prefix} Error closing position: {str(e)}")
+            raise
 
     async def reconcile_position(
         self, symbol: str, size: float, leverage: int, margin_mode: str
@@ -715,7 +779,7 @@ class BloFin:
                 else:
                     # Standard futures endpoint does not support partial size on close_positions.
                     # Reduce by sending the opposite market order in net mode.
-                    await self.open_market_position(
+                    reduction_order = await self.open_market_position(
                         symbol=symbol,
                         side=side,
                         size=reduction_size,
@@ -723,6 +787,8 @@ class BloFin:
                         margin_mode=current_margin_mode or margin_mode,
                         scale_lot_size=False,
                     )
+                    if reduction_order is None:
+                        raise RuntimeError(f"{self.log_prefix} Market reduction order failed for {symbol}")
                 current_size = size
 
             # Check for margin mode or leverage changes
@@ -769,7 +835,8 @@ class BloFin:
                     print(
                         f"{self.log_prefix} Position for {symbol} is already effectively closed (size={abs(current_size):.6f} < min={min_lots})."
                     )
-                    return
+                    self._record_order_success(symbol)
+                    return True
                 # Otherwise, always close (size_diff ensures we proceed)
             elif abs(current_size) == 0:
                 # Opening position: always proceed
@@ -785,7 +852,8 @@ class BloFin:
                     print(
                         f"{self.log_prefix} Position for {symbol} is already at target size (current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}, tolerance={position_tolerance:.6f})."
                     )
-                    return
+                    self._record_order_success(symbol)
+                    return True
 
             if size != 0 and await self._is_tiny_order_update(
                 symbol,
@@ -796,7 +864,15 @@ class BloFin:
                     f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
                     f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
                 )
-                return
+                self._record_order_success(symbol)
+                return True
+
+            if size_diff == 0:
+                self._record_order_success(symbol)
+                return True
+
+            if not is_risk_reducing_adjustment(current_size, size) and not self._can_attempt_order(symbol):
+                return False
 
             print(
                 f"{self.log_prefix} Adjusting position: current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}"
@@ -809,7 +885,7 @@ class BloFin:
             print(
                 f"{self.log_prefix} Placing a {side} order to adjust position by {size_diff}."
             )
-            await self.open_market_position(
+            order_result = await self.open_market_position(
                 symbol=symbol,
                 side=side.lower(),
                 size=size_diff,
@@ -817,8 +893,14 @@ class BloFin:
                 margin_mode=margin_mode,
                 scale_lot_size=False,  # Preserving the scale_lot_size parameter
             )
+            if order_result is None:
+                raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
+            self._record_order_success(symbol)
+            return True
         except Exception as e:
+            self._record_order_failure(symbol, e)
             print(f"{self.log_prefix} Error reconciling position: {str(e)}")
+            return False
 
     async def test_symbol_formats(self):
         """Test function to dump symbol information for mapping."""
@@ -829,7 +911,7 @@ class BloFin:
             for symbol in test_symbols:
                 try:
                     # Get instrument info
-                    instrument = await execute_with_timeout(
+                    await execute_with_timeout(
                         self.blofin_client.public.get_instruments,  # get_instruments_ct is not needed as it is the same as get_instruments
                         timeout=5,
                         inst_type="SWAP",
@@ -842,15 +924,14 @@ class BloFin:
                     # print(f"Full Response: {instrument}")
 
                     # Try to fetch a ticker to verify symbol works
-                    ticker = await self.fetch_tickers(symbol)
-                    # print(f"Ticker Test: {ticker}")
+                    await self.fetch_tickers(symbol)
 
                 except Exception as e:
                     print(f"{self.log_prefix} Error testing {symbol}: {str(e)}")
 
             # Test symbol mapping
             test_signals = ["BTCUSDT", "ETHUSDT"]
-            print("\n{self.log_prefix} Testing symbol mapping:")
+            print(f"\n{self.log_prefix} Testing symbol mapping:")
             for symbol in test_signals:
                 mapped = self.map_signal_symbol_to_exchange(symbol)
                 print(

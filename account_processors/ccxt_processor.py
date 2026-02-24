@@ -15,7 +15,8 @@ import asyncio
 import datetime
 import ccxt.async_support as ccxt  # pip install "ccxt[async]"
 from config.credentials import load_ccxt_credentials
-from core.utils.modifiers import scale_size_and_price, sanitize_lots, get_ccxt_market_steps
+from core.utils.modifiers import scale_size_and_price, sanitize_lots
+from core.utils.order_retry_guard import OrderRetryGuard, is_risk_reducing_adjustment
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -102,6 +103,12 @@ class CCXTProcessor:
             if configured_min_notional > 0
             else self.EXCHANGE_DEFAULT_MIN_NOTIONAL.get(self.exchange_name.strip().lower(), 0.0)
         )
+        self.order_retry_guard = OrderRetryGuard(
+            base_delay_seconds=5.0,
+            max_delay_seconds=120.0,
+            cooldown_log_interval_seconds=15.0,
+        )
+        self.non_retriable_error_cooldown_seconds = 180.0
 
         # Distinguish duplicate CCXT accounts (e.g., multiple Hyperliquid wallets).
         self.account_name = (getattr(self.credentials, "account_name", "") or self.exchange_name).strip()
@@ -173,6 +180,65 @@ class CCXTProcessor:
         return estimated_notional < self.min_order_notional_usd
 
     @staticmethod
+    def _error_signature(error: Exception) -> str:
+        msg = " ".join(str(error).strip().split())
+        return msg.lower()[:256]
+
+    @staticmethod
+    def _is_non_retriable_order_error(error: Exception) -> bool:
+        msg = str(error).lower()
+        non_retriable_tokens = (
+            "insufficient balance",
+            "insufficient margin",
+            "minimum value",
+            "minimum notional",
+            "min notional",
+            "invalid amount",
+            "invalid quantity",
+            "invalid qty",
+            "risk limit",
+            "reduce only",
+        )
+        return any(token in msg for token in non_retriable_tokens)
+
+    def _can_attempt_order(self, symbol: str) -> bool:
+        can_attempt, retry_in = self.order_retry_guard.can_attempt(symbol)
+        if can_attempt:
+            return True
+        should_log, suppressed = self.order_retry_guard.should_log_cooldown(symbol)
+        if should_log:
+            suppressed_note = (
+                f" ({suppressed} suppressed attempts during cooldown)"
+                if suppressed > 0
+                else ""
+            )
+            print(
+                f"{self.log_prefix} Cooldown active for {symbol}: retrying in {retry_in:.1f}s{suppressed_note}."
+            )
+        return False
+
+    def _record_order_success(self, symbol: str):
+        self.order_retry_guard.record_success(symbol)
+
+    def _record_order_failure(self, symbol: str, error: Exception):
+        signature = self._error_signature(error)
+        forced_delay = (
+            self.non_retriable_error_cooldown_seconds
+            if self._is_non_retriable_order_error(error)
+            else None
+        )
+        delay, failures = self.order_retry_guard.record_failure(
+            symbol=symbol,
+            error_signature=signature,
+            forced_delay_seconds=forced_delay,
+        )
+        classification = "non-retriable" if forced_delay is not None else "transient"
+        print(
+            f"{self.log_prefix} Order failure for {symbol} ({classification}, failures={failures}). "
+            f"Retry in {delay:.1f}s. Error: {error}"
+        )
+
+    @staticmethod
     def get_exchange_class(exchange_name: str):
         """Get CCXT exchange class by name and validate it exists."""
         try:
@@ -215,7 +281,7 @@ class CCXTProcessor:
                 return available
             else:
                 return 0.0
-        except Exception as e:
+        except Exception:
             return None
             
     async def fetch_all_open_positions(self):
@@ -232,7 +298,7 @@ class CCXTProcessor:
                 params=params
             )
             return positions
-        except Exception as e:
+        except Exception:
             return None
     
     async def fetch_open_positions(self, symbol):
@@ -249,7 +315,7 @@ class CCXTProcessor:
                 params=params
             )
             return positions
-        except Exception as e:
+        except Exception:
             return []
 
     async def fetch_open_orders(self, symbol):
@@ -261,7 +327,7 @@ class CCXTProcessor:
                 params={'type': 'swap'}
             )
             return orders
-        except Exception as e:
+        except Exception:
             return []
 
     async def fetch_and_map_positions(self, symbol: str):
@@ -277,7 +343,7 @@ class CCXTProcessor:
             ]
 
             return unified_positions
-        except Exception as e:
+        except Exception:
             return []
 
     def map_ccxt_position_to_unified(self, position: dict) -> UnifiedPosition:
@@ -288,9 +354,6 @@ class CCXTProcessor:
         
         # Adjust size for short positions
         size = contracts if side == 'long' else -contracts
-        
-        # Try to get more accurate data from raw exchange response if available
-        info = position.get('info', {})
         
         # Get average entry price from CCXT's standardized fields
         # Some exchanges provide 'average' as entry price, others use different fields
@@ -341,7 +404,7 @@ class CCXTProcessor:
                 volume=float(ticker.get('baseVolume', 0)),  # CCXT uses baseVolume
                 exchange=self.exchange_name
             )
-        except Exception as e:
+        except Exception:
             return None
 
     async def get_symbol_details(self, symbol: str):
@@ -392,7 +455,7 @@ class CCXTProcessor:
             contract_value = float(market.get('contractSize', 1) or 1)
             
             return lot_size, min_size, tick_size, contract_value, max_size
-        except Exception as e:
+        except Exception:
             return None
 
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True):
@@ -422,7 +485,7 @@ class CCXTProcessor:
                     symbol=symbol,
                     params={'marginMode': margin_mode}
                 )
-            except Exception as e:
+            except Exception:
                 pass
             
             max_chunk = sanitize_lots(max_size, lot_size, min_lots, rounding="down")
@@ -500,7 +563,7 @@ class CCXTProcessor:
                 )
                 return order
 
-        except Exception as e:
+        except Exception:
             return None
 
     async def close_position(self, symbol: str):
@@ -552,7 +615,7 @@ class CCXTProcessor:
             return order
             
         except Exception as e:
-            return None
+            raise RuntimeError(f"{self.log_prefix} Error closing position for {symbol}: {e}") from e
             
     async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
         """
@@ -567,7 +630,10 @@ class CCXTProcessor:
             current_position = unified_positions[0] if unified_positions else None
             
             # Fetch symbol details
-            lot_size, min_lots, tick_size, contract_value, max_size = await self.get_symbol_details(symbol)
+            symbol_details = await self.get_symbol_details(symbol)
+            if not symbol_details:
+                raise RuntimeError(f"{self.log_prefix} Missing symbol details for {symbol}")
+            lot_size, min_lots, tick_size, contract_value, max_size = symbol_details
 
             # Scale target size
             size, _, lot_size = scale_size_and_price(symbol, size, 0, lot_size, min_lots, tick_size, contract_value)
@@ -580,34 +646,11 @@ class CCXTProcessor:
             # Handle position flips
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
                 close_result = await self.close_position(symbol)
-                
-                # Only set current_size to 0 if close was successful
-                if close_result is not None:
-                    current_size = 0
-                else:
-                    # If close_position failed, we need to manually flip
-                    
-                    # Calculate total contracts needed to flip
-                    # From current_size to target size needs abs(current_size) + abs(size) contracts
-                    flip_amount = abs(current_size) + abs(size)
-                    
-                    # Determine side: if going from long to short or short to long
-                    flip_side = "sell" if current_size > 0 else "buy"
-                    
-                    # Place the flip order
-                    order = await self.open_market_position(
-                        symbol=symbol,
-                        side=flip_side.lower(),
-                        size=flip_amount,
-                        leverage=leverage,
-                        margin_mode=margin_mode,
-                        scale_lot_size=False
-                    )
-                    
-                    if order:
-                        return  # Position flip is complete
-                    else:
-                        return
+                # Close must complete before opening the opposite side.
+                # If there is no position to close anymore, treat as already flat.
+                if close_result is None:
+                    print(f"{self.log_prefix} No close order needed for {symbol}; proceeding with fresh target open.")
+                current_size = 0
             # Handle position size reduction
             elif current_size != 0 and abs(size) < abs(current_size):
                 reduction_size = abs(current_size) - abs(size)
@@ -625,7 +668,7 @@ class CCXTProcessor:
                 if reduction_size > 0:
                     max_chunk = sanitize_lots(max_size, lot_size, min_lots, rounding="down")
                     if max_chunk <= 0:
-                        return
+                        raise RuntimeError(f"{self.log_prefix} Invalid max order size for {symbol}: {max_size}")
 
                     if reduction_size > max_chunk:
                         num_full_chunks = int(reduction_size // max_chunk)
@@ -680,8 +723,13 @@ class CCXTProcessor:
                             marginMode=margin_mode,
                             symbol=symbol
                         )
-                    except Exception as e:
-                        await self.close_position(symbol)
+                    except Exception:
+                        close_result = await self.close_position(symbol)
+                        if close_result is None:
+                            print(
+                                f"{self.log_prefix} Margin-mode recovery close for {symbol} returned no order; "
+                                "continuing as flat."
+                            )
                         current_size = 0
 
             # Adjust leverage if needed
@@ -694,7 +742,7 @@ class CCXTProcessor:
                         symbol=symbol,
                         params={'marginMode': margin_mode}
                     )
-                except Exception as e:
+                except Exception:
                     pass
 
             # Calculate remaining size difference
@@ -708,7 +756,8 @@ class CCXTProcessor:
                 # Closing position: only skip if current size is strictly below min tradable lot.
                 # If size equals min_lots, it is still a real open position and must be closed.
                 if abs(current_size) < min_lots:
-                    return
+                    self._record_order_success(symbol)
+                    return True
                 # Otherwise, always close (size_diff ensures we proceed)
             elif abs(current_size) == 0:
                 # Opening position: always proceed
@@ -719,7 +768,8 @@ class CCXTProcessor:
                 position_tolerance = max(lot_size, min(abs(current_size), abs(size)) * 0.001)
                 
                 if abs(size_diff) < position_tolerance:
-                    return
+                    self._record_order_success(symbol)
+                    return True
 
             if size != 0 and await self._is_tiny_order_update(
                 symbol,
@@ -730,13 +780,20 @@ class CCXTProcessor:
                     f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
                     f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
                 )
-                return
+                self._record_order_success(symbol)
+                return True
 
             # Determine the side of the new order
             side = "buy" if size_diff > 0 else "sell"
             size_diff = abs(size_diff)
+            if size_diff <= 0:
+                self._record_order_success(symbol)
+                return True
 
-            await self.open_market_position(
+            if not is_risk_reducing_adjustment(current_size, size) and not self._can_attempt_order(symbol):
+                return False
+
+            order_result = await self.open_market_position(
                 symbol=symbol,
                 side=side.lower(),
                 size=size_diff,
@@ -744,8 +801,13 @@ class CCXTProcessor:
                 margin_mode=margin_mode,
                 scale_lot_size=False
             )
+            if order_result is None:
+                raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
+            self._record_order_success(symbol)
+            return True
         except Exception as e:
-            return
+            self._record_order_failure(symbol, e)
+            return False
 
     async def test_symbol_formats(self):
         """Test function to dump symbol information for mapping."""
@@ -758,21 +820,18 @@ class CCXTProcessor:
             
             for symbol in test_symbols:
                 try:
-                    if symbol in self.exchange.markets:
-                        market = self.exchange.markets[symbol]
-                    
                     # Try to fetch a ticker to verify symbol works
-                    ticker = await self.fetch_tickers(symbol)
+                    await self.fetch_tickers(symbol)
                     
-                except Exception as e:
+                except Exception:
                     pass
                     
             # Test symbol mapping
             test_signals = ["BTCUSDT", "ETHUSDT"]
             for symbol in test_signals:
-                mapped = self.map_signal_symbol_to_exchange(symbol)
+                self.map_signal_symbol_to_exchange(symbol)
                 
-        except Exception as e:
+        except Exception:
             pass
 
     def map_signal_symbol_to_exchange(self, signal_symbol: str) -> str:
@@ -824,7 +883,7 @@ class CCXTProcessor:
             total_value = available_balance + position_margin
             return total_value
             
-        except Exception as e:
+        except Exception:
             return None
 
     async def __aenter__(self):

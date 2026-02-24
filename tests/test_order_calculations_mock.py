@@ -59,7 +59,7 @@ def test_order_calculations_mock():
         print(f"Current Price: ${info['test_price']:,.2f}")
         print(f"{'='*70}")
         
-        print(f"\nExchange Specifications:")
+        print("\nExchange Specifications:")
         print(f"  Lot Size (precision): {info['lot_size']}")
         print(f"  Minimum Order: {info['min_size']} {info['name']}")
         print(f"  Maximum Order: {info['max_size']:,} {info['name']}")
@@ -72,7 +72,7 @@ def test_order_calculations_mock():
         print(f"  Min Order Value: ${min_usd:,.2f}")
         print(f"  Max Order Value: ${max_usd:,.2f}")
         
-        print(f"\nOrder Calculations:")
+        print("\nOrder Calculations:")
         print(f"{'USD Value':<12} {'Coin Amount':<15} {'Scaled Amount':<15} {'Final USD':<12} {'Status':<20}")
         print("-" * 85)
         

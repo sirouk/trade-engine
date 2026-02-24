@@ -11,7 +11,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from account_processors.blofin_processor import BloFin
 from account_processors.ccxt_processor import CCXTProcessor
 from config.credentials import load_ccxt_credentials
-from colorama import init, Fore, Style
+from colorama import init, Fore
 
 init(autoreset=True)
 

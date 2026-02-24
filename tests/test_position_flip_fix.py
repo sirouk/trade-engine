@@ -31,9 +31,6 @@ async def test_position_flip_fix():
         print(f"\nAccount Value: ${total_value:.2f}")
         print(f"ADA Price: ${current_price}")
         
-        # Use tiny position for testing
-        position_value = total_value * 0.0001  # 0.01% of account
-        
         # 1. First establish a short position
         print("\n" + "="*60)
         print("STEP 1: ESTABLISHING SHORT POSITION")

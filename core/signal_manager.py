@@ -370,7 +370,6 @@ class SignalManager:
                 #logger.info(f"Previous signals for {source}: {prev_signals}")
                 
                 # Make sure signal.leverage is set for all signals according to self.config
-                source_has_updates = False
                 for symbol_config in self.config:
                     symbol = symbol_config['symbol']
                     leverage = symbol_config['leverage']
@@ -386,7 +385,6 @@ class SignalManager:
                         # Only consider it an update if depth or timestamp changed
                         if (curr_signal.get('depth', 0) != prev_signal.get('depth', 0) or
                             curr_signal.get('timestamp') != prev_signal.get('timestamp')):
-                            source_has_updates = True
                             updates[source] = True
                 
                 current_signals[source] = signals

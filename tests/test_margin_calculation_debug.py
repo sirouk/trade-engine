@@ -55,18 +55,18 @@ async def debug_margin_calculations():
                 print(f"  Leverage: {leverage}x")
                 print(f"  Position Value: ${position_value:.2f}")
                 
-                print(f"\nMargin Values:")
+                print("\nMargin Values:")
                 print(f"  positionIM (Initial Margin): ${position_im:.2f}")
                 print(f"  positionBalance: ${position_balance:.2f}")
                 print(f"  positionMM (Maintenance Margin): ${position_mm:.2f}")
                 print(f"  Calculated (value/leverage): ${calculated_margin:.2f}")
                 
-                print(f"\nDifferences:")
+                print("\nDifferences:")
                 print(f"  positionBalance - positionIM: ${position_balance - position_im:.2f}")
                 print(f"  positionBalance - calculated: ${position_balance - calculated_margin:.2f}")
                 print(f"  positionIM - calculated: ${position_im - calculated_margin:.2f}")
                 
-                print(f"\nPnL Info:")
+                print("\nPnL Info:")
                 print(f"  Unrealized PnL: ${unrealized_pnl:.2f}")
                 print(f"  Cumulative Realized PnL: ${cum_realized_pnl:.2f}")
                 print(f"  Current Realized PnL: ${cur_realized_pnl:.2f}")

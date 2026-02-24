@@ -164,7 +164,7 @@ async def compare_processors():
                 print(f"  Liq Price: Native=${native_liq_price} vs CCXT=${ccxt_liq_price}")
                 
                 # Debug margin calculation
-                print(f"\n  Margin Calculation Debug:")
+                print("\n  Margin Calculation Debug:")
                 print(f"    Native uses positionBalance: ${native_margin:.2f}")
                 print(f"    CCXT uses initialMargin: ${ccxt_margin:.2f}")
                 print(f"    Calculated from notional/leverage: ${ccxt_notional / ccxt_leverage:.2f}")
@@ -175,13 +175,13 @@ async def compare_processors():
                 total_ccxt_unrealized_pnl += ccxt_unrealized
                 
             elif symbol in native_pos_map:
-                print(f"  ⚠️  Position only in Native processor")
+                print("  ⚠️  Position only in Native processor")
                 native_pos = native_pos_map[symbol]
                 native_margin = float(native_pos.get('positionBalance', native_pos.get('positionIM', 0)))
                 total_native_margin += native_margin
                 
             else:
-                print(f"  ⚠️  Position only in CCXT processor")
+                print("  ⚠️  Position only in CCXT processor")
                 ccxt_pos = ccxt_pos_map[symbol]
                 ccxt_margin = float(ccxt_pos.get('initialMargin', 0))
                 if ccxt_margin == 0 and ccxt_pos.get('notional') and float(ccxt_pos.get('leverage', 1)) > 0:
@@ -193,18 +193,18 @@ async def compare_processors():
         print("5. SUMMARY COMPARISON")
         print("="*60)
         
-        print(f"\nTotal Position Margin:")
+        print("\nTotal Position Margin:")
         print(f"  Native: ${total_native_margin:.2f}")
         print(f"  CCXT: ${total_ccxt_margin:.2f}")
         print(f"  Difference: ${abs(total_native_margin - total_ccxt_margin):.2f}")
         print(f"  Difference %: {abs(total_native_margin - total_ccxt_margin) / total_native_margin * 100:.2f}%")
         
-        print(f"\nTotal Unrealized PnL:")
+        print("\nTotal Unrealized PnL:")
         print(f"  Native: ${total_native_unrealized_pnl:.2f}")
         print(f"  CCXT: ${total_ccxt_unrealized_pnl:.2f}")
         print(f"  Difference: ${abs(total_native_unrealized_pnl - total_ccxt_unrealized_pnl):.2f}")
         
-        print(f"\nAccount Value Calculation:")
+        print("\nAccount Value Calculation:")
         print(f"  Native: Balance (${native_balance:.2f}) + Margin (${total_native_margin:.2f}) = ${native_balance + total_native_margin:.2f}")
         print(f"  CCXT: Balance (${ccxt_balance:.2f}) + Margin (${total_ccxt_margin:.2f}) = ${ccxt_balance + total_ccxt_margin:.2f}")
         
@@ -234,7 +234,7 @@ async def compare_processors():
                 native_uni = native_unified[0]
                 ccxt_uni = ccxt_unified[0]
                 
-                print(f"\nUnified Position Comparison:")
+                print("\nUnified Position Comparison:")
                 print(f"  Symbol: {native_uni.symbol} vs {ccxt_uni.symbol}")
                 print(f"  Size: {native_uni.size} vs {ccxt_uni.size}")
                 print(f"  Avg Entry: ${native_uni.average_entry_price} vs ${ccxt_uni.average_entry_price}")
@@ -290,7 +290,7 @@ async def main():
     start_time = datetime.now()
     
     try:
-        results = await compare_processors()
+        await compare_processors()
     except Exception as e:
         print(f"\n❌ Error during comparison: {str(e)}")
         import traceback

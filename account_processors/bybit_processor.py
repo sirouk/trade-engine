@@ -3,6 +3,7 @@ import datetime
 from pybit.unified_trading import HTTP # https://github.com/bybit-exchange/pybit/
 from config.credentials import load_bybit_credentials, default_min_order_notional_for_exchange
 from core.utils.modifiers import scale_size_and_price, sanitize_lots
+from core.utils.order_retry_guard import OrderRetryGuard, is_risk_reducing_adjustment
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -44,6 +45,12 @@ class ByBit:
             if getattr(self.credentials.bybit, "min_order_notional_usd", 0) > 0
             else default_min_order_notional_for_exchange("bybit")
         )
+        self.order_retry_guard = OrderRetryGuard(
+            base_delay_seconds=5.0,
+            max_delay_seconds=120.0,
+            cooldown_log_interval_seconds=15.0,
+        )
+        self.non_retriable_error_cooldown_seconds = 180.0
 
         # Add logger prefix
         self.log_prefix = f"[{self.exchange_name}]"
@@ -82,6 +89,78 @@ class ByBit:
             return False
 
         return estimated_notional < self.min_order_notional_usd
+
+    def _ensure_ok_response(self, response: dict, context: str):
+        if not isinstance(response, dict):
+            raise RuntimeError(f"{self.log_prefix} {context}: unexpected response type: {type(response).__name__}")
+        ret_code_raw = response.get("retCode", -1)
+        try:
+            ret_code = int(ret_code_raw)
+        except (TypeError, ValueError):
+            ret_code = -1
+        if ret_code != 0:
+            raise RuntimeError(
+                f"{self.log_prefix} {context}: retCode={ret_code} retMsg={response.get('retMsg')!r} response={response}"
+            )
+        return response
+
+    @staticmethod
+    def _error_signature(error: Exception) -> str:
+        msg = " ".join(str(error).strip().split())
+        return msg.lower()[:256]
+
+    @staticmethod
+    def _is_non_retriable_order_error(error: Exception) -> bool:
+        msg = str(error).lower()
+        non_retriable_tokens = (
+            "insufficient balance",
+            "insufficient margin",
+            "qty invalid",
+            "invalid qty",
+            "order quantity has invalid",
+            "order qty too low",
+            "position does not exist",
+            "risk limit",
+            "reduce-only rule not satisfied",
+        )
+        return any(token in msg for token in non_retriable_tokens)
+
+    def _can_attempt_order(self, symbol: str) -> bool:
+        can_attempt, retry_in = self.order_retry_guard.can_attempt(symbol)
+        if can_attempt:
+            return True
+        should_log, suppressed = self.order_retry_guard.should_log_cooldown(symbol)
+        if should_log:
+            suppressed_note = (
+                f" ({suppressed} suppressed attempts during cooldown)"
+                if suppressed > 0
+                else ""
+            )
+            print(
+                f"{self.log_prefix} Cooldown active for {symbol}: retrying in {retry_in:.1f}s{suppressed_note}."
+            )
+        return False
+
+    def _record_order_success(self, symbol: str):
+        self.order_retry_guard.record_success(symbol)
+
+    def _record_order_failure(self, symbol: str, error: Exception):
+        signature = self._error_signature(error)
+        forced_delay = (
+            self.non_retriable_error_cooldown_seconds
+            if self._is_non_retriable_order_error(error)
+            else None
+        )
+        delay, failures = self.order_retry_guard.record_failure(
+            symbol=symbol,
+            error_signature=signature,
+            forced_delay_seconds=forced_delay,
+        )
+        classification = "non-retriable" if forced_delay is not None else "transient"
+        print(
+            f"{self.log_prefix} Order failure for {symbol} ({classification}, failures={failures}). "
+            f"Retry in {delay:.1f}s. Error: {error}"
+        )
 
     async def fetch_balance(self, instrument="USDT"):
         try:
@@ -355,6 +434,7 @@ class ByBit:
                 orderLinkId=client_oid,
                 positionIdx=0, # one-way mode
             )
+            self._ensure_ok_response(order, f"place_order(limit,{symbol})")
             print(f"{self.log_prefix} Limit Order Placed: {order}")
             # Limit Order Placed: {'retCode': 0, 'retMsg': 'OK', 'result': {'orderId': '2c9eee09-b90e-47eb-ace0-d82c6cdc7bfa', 'orderLinkId': '20241014022046505544'}, 'retExtInfo': {}, 'time': 1728872447805}
             # Controlling 0.001 of BTC $62,957.00 is expected to be 62.957 USDT
@@ -363,6 +443,7 @@ class ByBit:
             
         except Exception as e:
             print(f"{self.log_prefix} Error placing limit order: {str(e)}")
+            raise
 
     async def open_market_position(self, symbol: str, side: str, size: float, leverage: int, margin_mode: str, scale_lot_size: bool = True, adjust_leverage: bool = True, adjust_margin_mode: bool = True):
         """Open a position with a market order."""
@@ -457,6 +538,7 @@ class ByBit:
                         orderLinkId=client_oid,
                         positionIdx=0
                     )
+                    self._ensure_ok_response(order, f"place_order(market-chunk,{symbol})")
                     orders.append(order)
                     total_executed += chunk_size
                     print(f"{self.log_prefix} Chunk order placed: {order}")
@@ -507,6 +589,7 @@ class ByBit:
                         orderLinkId=client_oid,
                         positionIdx=0
                     )
+                    self._ensure_ok_response(order, f"place_order(market-final,{symbol})")
                     orders.append(order)
                     total_executed += remainder
                     print(f"{self.log_prefix} Final chunk order placed: {order}")
@@ -554,10 +637,12 @@ class ByBit:
                     orderLinkId=client_oid,
                     positionIdx=0
                 )
+                self._ensure_ok_response(order, f"place_order(market,{symbol})")
                 print(f"{self.log_prefix} Market Order Placed: {order}")
                 return order
         except Exception as e:
             print(f"{self.log_prefix} Error placing market order: {str(e)}")
+            raise
 
     async def close_position(self, symbol: str):
         """Close the position for a specific symbol."""
@@ -592,6 +677,7 @@ class ByBit:
 
         except Exception as e:
             print(f"{self.log_prefix} Error closing position: {str(e)}")
+            raise
 
     async def reconcile_position(self, symbol: str, size: float, leverage: int, margin_mode: str):
         """
@@ -667,7 +753,8 @@ class ByBit:
                 # If size equals min_lots, it is still a real open position and must be closed.
                 if abs(current_size) < min_lots:
                     print(f"{self.log_prefix} Position for {symbol} is already effectively closed (size={abs(current_size):.6f} < min={min_lots}).")
-                    return
+                    self._record_order_success(symbol)
+                    return True
                 # Otherwise, always close (size_diff ensures we proceed)
             elif abs(current_size) == 0:
                 # Opening position: always proceed
@@ -679,7 +766,8 @@ class ByBit:
                 
                 if abs(size_diff) < position_tolerance:
                     print(f"{self.log_prefix} Position for {symbol} is already at target size (current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}, tolerance={position_tolerance:.6f}).")
-                    return
+                    self._record_order_success(symbol)
+                    return True
 
             if size != 0 and await self._is_tiny_order_update(
                 symbol,
@@ -690,7 +778,15 @@ class ByBit:
                     f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
                     f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
                 )
-                return
+                self._record_order_success(symbol)
+                return True
+
+            if size_diff == 0:
+                self._record_order_success(symbol)
+                return True
+
+            if not is_risk_reducing_adjustment(current_size, size) and not self._can_attempt_order(symbol):
+                return False
             
             print(f"{self.log_prefix} Adjusting position: current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}")
 
@@ -699,7 +795,7 @@ class ByBit:
             size_diff = abs(size_diff)  # Use absolute value for the order size
 
             print(f"{self.log_prefix} Placing a {side} order to adjust position by {size_diff}.")
-            await self.open_market_position(
+            order_result = await self.open_market_position(
                 symbol=symbol,
                 side=side.capitalize(),
                 size=size_diff,
@@ -709,8 +805,14 @@ class ByBit:
                 adjust_leverage=size != 0,
                 adjust_margin_mode=size != 0,
             )
+            if order_result is None:
+                raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
+            self._record_order_success(symbol)
+            return True
         except Exception as e:
+            self._record_order_failure(symbol, e)
             print(f"{self.log_prefix} Error reconciling position: {str(e)}")
+            return False
 
     async def test_symbol_formats(self):
         """Test function to dump symbol information for mapping."""
@@ -721,7 +823,7 @@ class ByBit:
             for symbol in test_symbols:
                 try:
                     # Get instrument info
-                    instrument = await execute_with_timeout(
+                    await execute_with_timeout(
                         self.bybit_client.get_instruments_info,
                         timeout=5,
                         category="linear",
@@ -733,8 +835,7 @@ class ByBit:
                     #print(f"Full Response: {instrument}")
                     
                     # Try to fetch a ticker to verify symbol works
-                    ticker = await self.fetch_tickers(symbol)
-                    #print(f"Ticker Test: {ticker}")
+                    await self.fetch_tickers(symbol)
                     
                 except Exception as e:
                     print(f"{self.log_prefix} Error testing {symbol}: {str(e)}")
@@ -895,7 +996,7 @@ async def main():
                 print(f"{bybit.log_prefix} Found working symbol: {alt_symbol}")
                 print(f"{bybit.log_prefix} Max Order Qty: {max_size}")
                 break
-            except:
+            except Exception:
                 continue
     
     # End time

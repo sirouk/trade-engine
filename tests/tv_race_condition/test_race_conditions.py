@@ -69,9 +69,9 @@ class RaceConditionTester:
             f.write('2025-06-12 15:00:02.000000 {"symbol": "DOTUSDT", "direction": "short", "action": "sell", "leverage": "3", "size": "-50/100", "priority": "high", "takeprofit": "0.0", "trailstop": "0.0"}\n')
         
         print(f"\nCreated test files in: {self.test_dir}")
-        print(f"  - trade_requests_2025-06-10.log (2 out-of-order race conditions)")
-        print(f"  - trade_requests_2025-06-11.log (2 correct order race conditions)")
-        print(f"  - trade_requests_2025-06-12.log (no race conditions)")
+        print("  - trade_requests_2025-06-10.log (2 out-of-order race conditions)")
+        print("  - trade_requests_2025-06-11.log (2 correct order race conditions)")
+        print("  - trade_requests_2025-06-12.log (no race conditions)")
         
     def process_test_signals(self):
         """Process test signals using the actual TradingViewProcessor."""
@@ -100,7 +100,7 @@ class RaceConditionTester:
                 print(f"  Direction: {'LONG' if signal_data['depth'] > 0 else 'SHORT' if signal_data['depth'] < 0 else 'FLAT'}")
                 print(f"  Depth: {signal_data['depth']}")
                 print(f"  Timestamp: {signal_data['timestamp']}")
-                print(f"  Audit:")
+                print("  Audit:")
                 print(f"    Original Timestamp: {signal_data['audit']['original_timestamp']}")
                 print(f"    Adjusted: {signal_data['audit']['adjusted']}")
                 if signal_data['audit'].get('adjustment_reason'):
@@ -165,7 +165,7 @@ class RaceConditionTester:
                                     'file': os.path.basename(file_path)
                                 })
                                 total_signals += 1
-                    except:
+                    except Exception:
                         continue
             
             # Check for race conditions in this file

@@ -7,13 +7,11 @@ This simulates what execute_trades.py does across all accounts
 import asyncio
 import sys
 import os
-from datetime import datetime
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from account_processors.ccxt_processor import CCXTProcessor
-from core.utils.modifiers import scale_size_and_price
 
 
 async def test_reconcile_scenarios():
@@ -94,7 +92,7 @@ async def test_reconcile_scenarios():
         new_leverage = 3
         new_quantity = (position_value * new_leverage) / current_price
         
-        print(f"Changing leverage from 1x to 3x")
+        print("Changing leverage from 1x to 3x")
         print(f"New position size will be: {new_quantity:.2f} ADA")
         
         confirm = input("\nProceed? (yes/no): ").strip().lower()
@@ -162,7 +160,7 @@ async def test_reconcile_scenarios():
         short_new_leverage = 4
         short_new_quantity = (position_value * short_new_leverage) / current_price
         
-        print(f"Changing leverage from 2x to 4x on short")
+        print("Changing leverage from 2x to 4x on short")
         print(f"New position size will be: {short_new_quantity:.2f} ADA")
         
         confirm = input("\nProceed? (yes/no): ").strip().lower()
@@ -186,7 +184,7 @@ async def test_reconcile_scenarios():
         flip_leverage = 2
         flip_quantity = (position_value * flip_leverage) / current_price
         
-        print(f"Flipping from short to long position")
+        print("Flipping from short to long position")
         print(f"New long position: {flip_quantity:.2f} ADA at {flip_leverage}x leverage")
         print("Note: reconcile_position will automatically close the short and open long")
         

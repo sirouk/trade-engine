@@ -281,7 +281,7 @@ class TradingViewProcessor:
         # If we have both flat and position signals, ensure flat comes first
         if flat_signals and position_signals:
             if self.verbose:
-                print(f"Reordering signals for proper position transition")
+                print("Reordering signals for proper position transition")
             return flat_signals + position_signals
         
         # Otherwise, keep original order

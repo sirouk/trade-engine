@@ -5,7 +5,6 @@ Check if Bybit is configured for CCXT
 
 import sys
 import os
-import json
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,7 +38,7 @@ try:
         
         # Check CCXT credentials
         if creds.ccxt and creds.ccxt.exchange_name:
-            print(f"\n📌 CCXT credentials found:")
+            print("\n📌 CCXT credentials found:")
             print(f"   Exchange: {creds.ccxt.exchange_name}")
             print(f"   API Key: {creds.ccxt.api_key[:8] if creds.ccxt.api_key else 'Not set'}...")
             print(f"   Enabled: {creds.ccxt.enabled}")

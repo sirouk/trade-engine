@@ -3,6 +3,7 @@ import datetime
 from pymexc import futures
 from config.credentials import load_mexc_credentials, default_min_order_notional_for_exchange
 from core.utils.modifiers import scale_size_and_price, sanitize_lots
+from core.utils.order_retry_guard import OrderRetryGuard, is_risk_reducing_adjustment
 from core.unified_position import UnifiedPosition
 from core.unified_ticker import UnifiedTicker
 from core.utils.execute_timed import execute_with_timeout
@@ -43,6 +44,12 @@ class MEXC:
             if getattr(self.credentials.mexc, "min_order_notional_usd", 0) > 0
             else default_min_order_notional_for_exchange("mexc")
         )
+        self.order_retry_guard = OrderRetryGuard(
+            base_delay_seconds=5.0,
+            max_delay_seconds=120.0,
+            cooldown_log_interval_seconds=15.0,
+        )
+        self.non_retriable_error_cooldown_seconds = 180.0
 
     async def _estimate_order_notional(self, symbol: str, size: float, contract_value: float) -> float:
         if self.min_order_notional_usd <= 0 or not size:
@@ -78,6 +85,63 @@ class MEXC:
             return False
 
         return estimated_notional < self.min_order_notional_usd
+
+    @staticmethod
+    def _error_signature(error: Exception) -> str:
+        msg = " ".join(str(error).strip().split())
+        return msg.lower()[:256]
+
+    @staticmethod
+    def _is_non_retriable_order_error(error: Exception) -> bool:
+        msg = str(error).lower()
+        non_retriable_tokens = (
+            "insufficient balance",
+            "insufficient margin",
+            "minimum value",
+            "minimum notional",
+            "invalid quantity",
+            "invalid size",
+            "risk limit",
+            "position does not exist",
+        )
+        return any(token in msg for token in non_retriable_tokens)
+
+    def _can_attempt_order(self, symbol: str) -> bool:
+        can_attempt, retry_in = self.order_retry_guard.can_attempt(symbol)
+        if can_attempt:
+            return True
+        should_log, suppressed = self.order_retry_guard.should_log_cooldown(symbol)
+        if should_log:
+            suppressed_note = (
+                f" ({suppressed} suppressed attempts during cooldown)"
+                if suppressed > 0
+                else ""
+            )
+            print(
+                f"{self.log_prefix} Cooldown active for {symbol}: retrying in {retry_in:.1f}s{suppressed_note}."
+            )
+        return False
+
+    def _record_order_success(self, symbol: str):
+        self.order_retry_guard.record_success(symbol)
+
+    def _record_order_failure(self, symbol: str, error: Exception):
+        signature = self._error_signature(error)
+        forced_delay = (
+            self.non_retriable_error_cooldown_seconds
+            if self._is_non_retriable_order_error(error)
+            else None
+        )
+        delay, failures = self.order_retry_guard.record_failure(
+            symbol=symbol,
+            error_signature=signature,
+            forced_delay_seconds=forced_delay,
+        )
+        classification = "non-retriable" if forced_delay is not None else "transient"
+        print(
+            f"{self.log_prefix} Order failure for {symbol} ({classification}, failures={failures}). "
+            f"Retry in {delay:.1f}s. Error: {error}"
+        )
 
     async def fetch_balance(self, instrument="USDT"):
         """Fetch the futures account balance for a specific instrument."""
@@ -430,7 +494,7 @@ class MEXC:
         try:
             # First check if account is enabled
             if not self.enabled:
-                return
+                return True
             
             # Get current positions
             positions = await self.fetch_open_positions(symbol)
@@ -463,7 +527,9 @@ class MEXC:
             # Determine if we need to close the current position before opening a new one
             if (current_size > 0 and size < 0) or (current_size < 0 and size > 0):
                 print(f"{self.log_prefix} Flipping position from {current_size} to {size}. Closing current position.")
-                await self.close_position(symbol)  # Close the current position
+                close_result = await self.close_position(symbol)  # Close the current position
+                if close_result is None:
+                    raise RuntimeError(f"{self.log_prefix} Failed to close position during flip for {symbol}")
                 current_size = 0 # Update current size to 0 after closing the position
 
             # Check for margin mode or leverage changes
@@ -471,7 +537,9 @@ class MEXC:
                 if current_margin_mode != margin_mode:
 
                     print(f"{self.log_prefix} Closing position to modify margin mode to {margin_mode}.")
-                    await self.close_position(symbol)  # Close the current position
+                    close_result = await self.close_position(symbol)  # Close the current position
+                    if close_result is None:
+                        raise RuntimeError(f"{self.log_prefix} Failed to close position for margin-mode change on {symbol}")
                     current_size = 0 # Update current size to 0 after closing the position
 
                     print(f"{self.log_prefix} Adjusting account margin mode to {margin_mode}.")
@@ -490,7 +558,9 @@ class MEXC:
             if current_leverage is not None and current_leverage > 0 and abs(current_leverage - leverage) > self.leverage_tolerance * leverage and current_size != 0 and abs(size) > 0:
                 print("KuCoin does not allow adjustment for leverage on an open position.")
                 print(f"Closing position to modify leverage from {current_leverage} to {leverage}.")
-                await self.close_position(symbol)  # Close the current position
+                close_result = await self.close_position(symbol)  # Close the current position
+                if close_result is None:
+                    raise RuntimeError(f"{self.log_prefix} Failed to close position for leverage change on {symbol}")
                 current_size = 0 # Update current size to 0 after closing the position
 
             # Calculate size difference with proper precision
@@ -505,7 +575,8 @@ class MEXC:
                 # If size equals min_lots, it is still a real open position and must be closed.
                 if abs(current_size) < min_lots:
                     print(f"{self.log_prefix} Position for {symbol} is already effectively closed (size={abs(current_size):.6f} < min={min_lots}).")
-                    return
+                    self._record_order_success(symbol)
+                    return True
                 # Otherwise, always close (size_diff ensures we proceed)
             elif abs(current_size) == 0:
                 # Opening position: always proceed
@@ -517,7 +588,8 @@ class MEXC:
                 
                 if abs(size_diff) < position_tolerance:
                     print(f"{self.log_prefix} Position for {symbol} is already at target size (current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}, tolerance={position_tolerance:.6f}).")
-                    return
+                    self._record_order_success(symbol)
+                    return True
 
             if size != 0 and await self._is_tiny_order_update(
                 symbol,
@@ -528,7 +600,15 @@ class MEXC:
                     f"{self.log_prefix} Skipping {symbol}: adjust-size notional is below minimum "
                     f"{self.min_order_notional_usd:.4f} (size_diff={size_diff}, contract_value={contract_value})."
                 )
-                return
+                self._record_order_success(symbol)
+                return True
+
+            if size_diff == 0:
+                self._record_order_success(symbol)
+                return True
+
+            if not is_risk_reducing_adjustment(current_size, size) and not self._can_attempt_order(symbol):
+                return False
             
             print(f"{self.log_prefix} Adjusting position: current={current_size:.6f}, target={size:.6f}, diff={size_diff:.6f}")
 
@@ -537,7 +617,7 @@ class MEXC:
             size_diff = abs(size_diff)  # Work with absolute size for the order
 
             print(f"{self.log_prefix} Placing a {side} order with {leverage}x leverage to adjust position by {size_diff}.")
-            await self.open_market_position(
+            order_result = await self.open_market_position(
                 symbol=symbol,
                 side=side,
                 size=size_diff,
@@ -545,8 +625,14 @@ class MEXC:
                 margin_mode=margin_mode,
                 scale_lot_size=False
             )
+            if order_result is None:
+                raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
+            self._record_order_success(symbol)
+            return True
         except Exception as e:
+            self._record_order_failure(symbol, e)
             print(f"{self.log_prefix} Error reconciling position: {str(e)}")
+            return False
 
     async def test_symbol_formats(self):
         """Test function to dump symbol information for mapping."""
@@ -557,7 +643,7 @@ class MEXC:
             for symbol in test_symbols:
                 try:
                     # Get contract details
-                    contract = await execute_with_timeout(
+                    await execute_with_timeout(
                         self.futures_client.detail,
                         timeout=5,
                         symbol=symbol
@@ -568,8 +654,7 @@ class MEXC:
                     #print(f"Full Response: {contract}")
                     
                     # Try to fetch a ticker to verify symbol works
-                    ticker = await self.fetch_tickers(symbol)
-                    #print(f"Ticker Test: {ticker}")
+                    await self.fetch_tickers(symbol)
                     
                 except Exception as e:
                     print(f"{self.log_prefix} Error testing {symbol}: {str(e)}")

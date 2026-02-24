@@ -64,7 +64,7 @@ async def test_leverage_changes():
         leverage_1x = 1
         size_1x = (margin_amount * leverage_1x) / current_price
         
-        print(f"Opening position with 1x leverage:")
+        print("Opening position with 1x leverage:")
         print(f"  Expected size: {size_1x:.2f} ADA")
         print(f"  Expected notional: ${margin_amount * leverage_1x:.2f}")
         print(f"  Expected margin: ${margin_amount:.2f}")
@@ -81,7 +81,7 @@ async def test_leverage_changes():
             margin_mode="isolated"
         )
         
-        pos1 = await show_position_details("Position with 1x leverage:")
+        await show_position_details("Position with 1x leverage:")
         
         # 2. INCREASE LEVERAGE TO 2x
         print("\n" + "="*60)
@@ -107,7 +107,7 @@ async def test_leverage_changes():
             margin_mode="isolated"
         )
         
-        pos2 = await show_position_details("Position with 2x leverage:")
+        await show_position_details("Position with 2x leverage:")
         
         # 3. INCREASE LEVERAGE TO 5x
         print("\n" + "="*60)
@@ -133,7 +133,7 @@ async def test_leverage_changes():
             margin_mode="isolated"
         )
         
-        pos5 = await show_position_details("Position with 5x leverage:")
+        await show_position_details("Position with 5x leverage:")
         
         # 4. DECREASE LEVERAGE TO 3x
         print("\n" + "="*60)
@@ -159,7 +159,7 @@ async def test_leverage_changes():
             margin_mode="isolated"
         )
         
-        pos3 = await show_position_details("Position with 3x leverage:")
+        await show_position_details("Position with 3x leverage:")
         
         # 5. TEST SHORT POSITION WITH LEVERAGE CHANGE
         print("\n" + "="*60)

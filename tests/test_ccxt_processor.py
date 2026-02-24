@@ -114,7 +114,7 @@ async def test_exchange_specific_features():
                 print(f"  Error: {str(e)}")
             
             # Test symbol details
-            print(f"\nTesting symbol details for BTC/USDT:USDT...")
+            print("\nTesting symbol details for BTC/USDT:USDT...")
             try:
                 details = await processor.get_symbol_details("BTC/USDT:USDT")
                 if details:
