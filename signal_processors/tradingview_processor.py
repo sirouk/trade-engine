@@ -60,6 +60,24 @@ class TradingViewProcessor:
         """Normalize the symbol based on the core asset mapping."""
         return self.CORE_ASSET_MAPPING.get(symbol, symbol)
 
+    @staticmethod
+    def _parse_leverage(raw_leverage, direction):
+        """Parse optional leverage from TradingView payload."""
+        if direction == "flat":
+            return None
+        if raw_leverage is None:
+            return None
+        leverage_str = str(raw_leverage).strip()
+        if leverage_str == "":
+            return None
+        try:
+            leverage = float(leverage_str)
+        except (TypeError, ValueError):
+            return None
+        if leverage <= 0:
+            return None
+        return leverage
+
     def _parse_signal_file(self, file_path, signals, symbol_dates):
         """Parse a signal file and update signals with the latest data."""
         if self.verbose:
@@ -132,12 +150,15 @@ class TradingViewProcessor:
                     print(f"Price parsing error in line: {line}")
                     continue
 
+                leverage = self._parse_leverage(signal_data.get("leverage"), direction)
+
                 # Store the signal with all its data
                 signal_entry = {
                     "symbol": symbol,
                     "original_symbol": original_symbol,
                     "direction": direction,
                     "depth": depth,
+                    "leverage": leverage,
                     "price": price if price is not None and price > 0 else None,
                     "timestamp": line_timestamp,
                     "original_timestamp": line_timestamp.isoformat(),  # Preserve original timestamp
@@ -187,6 +208,7 @@ class TradingViewProcessor:
                     "symbol": symbol,
                     "original_symbols": [latest_signal["original_symbol"]],
                     "depth": latest_signal["depth"],
+                    "leverage": latest_signal.get("leverage"),
                     "price": latest_signal["price"],
                     "average_price": None,
                     "timestamp": latest_signal["timestamp"],

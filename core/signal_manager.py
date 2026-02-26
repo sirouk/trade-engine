@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 class SignalManager:
     CACHE_FILE = "account_asset_depths.json"
+    LEVERAGE_CACHE_FILE = "account_asset_leverages.json"
     CONFIG_FILE = "signal_weight_config.json"
     ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     SIGNAL_PROCESSORS_DIR = "signal_processors"
@@ -63,6 +64,33 @@ class SignalManager:
         return merged
 
     @staticmethod
+    def _merge_leverage_maps(base: Dict, incoming: Dict) -> Dict:
+        """Merge per-symbol leverage maps, preferring valid incoming values."""
+        merged = dict(base or {})
+        if not isinstance(incoming, dict):
+            return merged
+
+        for symbol, value in incoming.items():
+            try:
+                leverage_val = float(value)
+                if leverage_val > 0:
+                    merged[symbol] = leverage_val
+            except (TypeError, ValueError):
+                continue
+        return merged
+
+    @staticmethod
+    def _parse_positive_leverage(value, fallback: float | None = None) -> float | None:
+        """Parse leverage as positive float, otherwise return fallback."""
+        try:
+            leverage = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        if leverage <= 0:
+            return fallback
+        return leverage
+
+    @staticmethod
     def _resolve_account_name(account) -> str:
         """Resolve an account key from processor metadata."""
         if not account:
@@ -90,9 +118,11 @@ class SignalManager:
         self.signal_processors = {}  # {source_name: processor_instance}
         self.account_processors = {}  # {account_name: processor_instance}
         self.account_asset_depths = {}  # {account_name: {asset: depth}}
+        self.account_asset_leverages = {}  # {account_name: {asset: leverage}}
         self.config = self._load_config()
         self.previous_signals = {}  # Track previous raw signals
         self._temp_depths = {}  # Initialize temp depths
+        self._temp_leverages = {}  # Initialize temp leverage targets
         self._changed_symbols = {}  # Track which symbols changed per account: {account_name: [symbol, ...]}
         self._initialize_processors()
         self.processors = self.signal_processors  # For compatibility with existing code
@@ -101,6 +131,7 @@ class SignalManager:
         self._cache_lock = asyncio.Lock()
         self._pending_updates = {}  # Track pending cache updates by account
         self.account_asset_depths = self._load_cache()
+        self.account_asset_leverages = self._load_leverage_cache()
     
     def _load_config(self) -> dict:
         """Load signal weight configuration."""
@@ -118,6 +149,14 @@ class SignalManager:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
+
+    def _load_leverage_cache(self):
+        """Load cached account-asset leverage targets."""
+        try:
+            with open(self.LEVERAGE_CACHE_FILE, 'r') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
     
     async def _save_cache(self):
         """Save account-asset depths to cache."""
@@ -128,6 +167,15 @@ class SignalManager:
                 os.fsync(f.fileno())
         except Exception as e:
             logger.error(f"Error saving cache: {str(e)}")
+
+    async def _save_leverage_cache(self):
+        """Save account-asset leverage targets to cache."""
+        try:
+            with open(self.LEVERAGE_CACHE_FILE, 'w') as f:
+                json.dump(self.account_asset_leverages, f, indent=4)
+                os.fsync(f.fileno())
+        except Exception as e:
+            logger.error(f"Error saving leverage cache: {str(e)}")
     
     def _initialize_processors(self):
         """Initialize signal and account processors."""
@@ -262,6 +310,7 @@ class SignalManager:
 
         updates = {}
         new_depths = {}
+        new_leverages = {}
         current_signals = {}
         has_updates = False
         
@@ -292,6 +341,7 @@ class SignalManager:
 
         # Canonicalize/merge cache keys to avoid duplicates like "BloFin" vs "blofin".
         cache_by_canonical = {}
+        leverage_cache_by_canonical = {}
         cache_aliases = {}
         for raw_name, raw_depths in (self.account_asset_depths or {}).items():
             raw_name_str = str(raw_name)
@@ -313,6 +363,10 @@ class SignalManager:
                         cache_by_canonical.get(canonical, {}),
                         raw_depths if isinstance(raw_depths, dict) else {},
                     )
+                    leverage_cache_by_canonical[canonical] = self._merge_leverage_maps(
+                        leverage_cache_by_canonical.get(canonical, {}),
+                        (self.account_asset_leverages or {}).get(raw_name, {}),
+                    )
                     continue
 
             cache_aliases.setdefault(canonical, set()).add(raw_name)
@@ -320,8 +374,16 @@ class SignalManager:
                 cache_by_canonical.get(canonical, {}),
                 raw_depths if isinstance(raw_depths, dict) else {},
             )
+            leverage_cache_by_canonical[canonical] = self._merge_leverage_maps(
+                leverage_cache_by_canonical.get(canonical, {}),
+                (self.account_asset_leverages or {}).get(raw_name, {}),
+            )
 
-        all_canonical_accounts = set(account_by_canonical.keys()) | set(cache_by_canonical.keys())
+        all_canonical_accounts = (
+            set(account_by_canonical.keys())
+            | set(cache_by_canonical.keys())
+            | set(leverage_cache_by_canonical.keys())
+        )
 
         # Map canonical names back to runtime/display keys.
         display_by_canonical = {}
@@ -353,12 +415,19 @@ class SignalManager:
             _ = is_enabled  # Explicitly retained for readability symmetry.
 
             new_depths[account_name] = dict(cache_by_canonical.get(canonical, {}))
+            new_leverages[account_name] = dict(leverage_cache_by_canonical.get(canonical, {}))
 
             # Only initialize missing symbols
             for symbol_config in self.config:
                 symbol = symbol_config['symbol']
                 if symbol not in new_depths[account_name]:
                     new_depths[account_name][symbol] = 0
+                if symbol not in new_leverages[account_name]:
+                    default_leverage = self._parse_positive_leverage(
+                        symbol_config.get("leverage", 1),
+                        fallback=1.0,
+                    )
+                    new_leverages[account_name][symbol] = float(default_leverage or 1.0)
         
         # Compare raw signals first
         for source, processor in self.signal_processors.items():
@@ -369,24 +438,32 @@ class SignalManager:
                 #logger.info(f"Current signals for {source}: {signals}")
                 #logger.info(f"Previous signals for {source}: {prev_signals}")
                 
-                # Make sure signal.leverage is set for all signals according to self.config
+                # Compare only symbols present in config and mark source updates.
                 for symbol_config in self.config:
                     symbol = symbol_config['symbol']
-                    leverage = symbol_config['leverage']
-                    
-                    # Only process symbols we care about from config
-                    if symbol in signals:
-                        signals[symbol]['leverage'] = leverage
-                        
-                        # Compare only relevant fields for this symbol
-                        curr_signal = signals.get(symbol, {})
-                        prev_signal = prev_signals.get(symbol, {})
-                        
-                        # Only consider it an update if depth or timestamp changed
-                        if (curr_signal.get('depth', 0) != prev_signal.get('depth', 0) or
-                            curr_signal.get('timestamp') != prev_signal.get('timestamp')):
-                            updates[source] = True
-                
+                    if symbol not in signals:
+                        continue
+
+                    curr_signal = signals.get(symbol, {})
+                    prev_signal = prev_signals.get(symbol, {})
+
+                    curr_lev = self._parse_positive_leverage(
+                        curr_signal.get("leverage"),
+                        fallback=None,
+                    )
+                    prev_lev = self._parse_positive_leverage(
+                        prev_signal.get("leverage"),
+                        fallback=None,
+                    )
+
+                    # Consider source updated on depth, timestamp, or leverage change.
+                    if (
+                        curr_signal.get('depth', 0) != prev_signal.get('depth', 0)
+                        or curr_signal.get('timestamp') != prev_signal.get('timestamp')
+                        or curr_lev != prev_lev
+                    ):
+                        updates[source] = True
+
                 current_signals[source] = signals
                 self.previous_signals[source] = signals
             else:
@@ -394,33 +471,60 @@ class SignalManager:
                 current_signals[source] = {}
         
         #logger.info("\n=== Weighted Asset Depths ===")
-        # Calculate weighted depths for each asset
+        # Calculate weighted depths and leverage targets for each asset.
         asset_depths = {}  # {asset: weighted_depth}
+        asset_leverages = {}  # {asset: weighted_target_leverage}
         for symbol_config in self.config:
             symbol = symbol_config['symbol']
-            total_weight = 0
             weighted_sum = 0
+            weighted_abs_depth_for_leverage = 0.0
+            weighted_leverage_sum = 0.0
+            base_leverage = self._parse_positive_leverage(
+                symbol_config.get("leverage", 1),
+                fallback=1.0,
+            )
             
             #logger.info(f"\n{symbol} weights:")
             for source_config in symbol_config['sources']:
                 source = source_config['source']
-                weight = source_config['weight']
+                try:
+                    weight = float(source_config['weight'])
+                except (TypeError, ValueError):
+                    continue
                 
                 if weight > 0:
                     signals = current_signals.get(source, {})
-                    depth = float(signals.get(symbol, {}).get('depth', 0)) \
-                        if isinstance(signals.get(symbol), dict) else 0
+                    signal_data = signals.get(symbol, {}) if isinstance(signals, dict) else {}
+                    depth = (
+                        float(signal_data.get('depth', 0))
+                        if isinstance(signal_data, dict)
+                        else 0.0
+                    )
                     # weight (e.g. 0.30) defines max account allocation of entire account value
                     # depth (e.g. 0.0235) defines what portion of that allocation to use
                     weighted_sum += depth * weight
-                    total_weight += weight
+                    abs_weighted_depth = abs(depth) * weight
+
+                    src_lev = self._parse_positive_leverage(
+                        signal_data.get("leverage") if isinstance(signal_data, dict) else None,
+                        fallback=None,
+                    )
+                    if src_lev is not None and abs_weighted_depth > 0.0:
+                        weighted_leverage_sum += src_lev * abs_weighted_depth
+                        weighted_abs_depth_for_leverage += abs_weighted_depth
                     #logger.info(f"  {source}: depth={depth}, weight={weight}")
-            
-            if total_weight > 0:
-                # Final depth represents margin allocation relative to account value
-                #asset_depths[symbol] = weighted_sum / total_weight
-                asset_depths[symbol] = weighted_sum
-                #logger.info(f"  Combined depth: {asset_depths[symbol]}")
+
+            # Final depth represents margin allocation relative to account value.
+            asset_depths[symbol] = weighted_sum
+
+            # If sources provide leverage (TradingView webhook), blend by absolute
+            # weighted depth contribution. Otherwise fall back to config leverage.
+            if weighted_abs_depth_for_leverage > 0.0:
+                effective_leverage = weighted_leverage_sum / weighted_abs_depth_for_leverage
+            else:
+                effective_leverage = float(base_leverage or 1.0)
+            asset_leverages[symbol] = max(1.0, float(effective_leverage))
+            #logger.info(f"  Combined depth/leverage: {asset_depths[symbol]} @ {asset_leverages[symbol]}x")
         
         #logger.info("\n=== Account Asset Depths ===")
         # Check each account for changes and track which symbols changed
@@ -431,11 +535,30 @@ class SignalManager:
             account = account_by_canonical.get(canonical)
             is_enabled = account.enabled if account else False
             current_depths = cache_by_canonical.get(canonical, {})
+            current_leverages = leverage_cache_by_canonical.get(canonical, {})
             self._changed_symbols[account_name] = []  # Initialize list for this account
             
             for asset, new_depth in asset_depths.items():
+                symbol_config = next((sc for sc in self.config if sc['symbol'] == asset), None)
+                default_cfg_leverage = self._parse_positive_leverage(
+                    symbol_config.get("leverage", 1) if symbol_config else 1,
+                    fallback=1.0,
+                )
+
                 current_depth = current_depths.get(asset, 0)
                 target_depth = new_depth if is_enabled else 0
+                current_leverage = self._parse_positive_leverage(
+                    current_leverages.get(asset),
+                    fallback=float(default_cfg_leverage or 1.0),
+                )
+                target_leverage = self._parse_positive_leverage(
+                    asset_leverages.get(asset),
+                    fallback=float(default_cfg_leverage or 1.0),
+                )
+                # Disabled lanes should close depth to zero, but avoid leverage-only churn.
+                if not is_enabled:
+                    target_leverage = current_leverage
+                new_leverages[account_name][asset] = float(target_leverage or 1.0)
                 
                 # Round both depths for comparison
                 current_depth = float(current_depth)
@@ -445,18 +568,25 @@ class SignalManager:
                 # Only update if change is significant (> 0.0001 or > 0.1% of larger value)
                 depth_diff = abs(target_depth - current_depth)
                 depth_tolerance = max(0.0001, max(abs(current_depth), abs(target_depth)) * 0.001)
+                leverage_changed = abs(float(target_leverage) - float(current_leverage)) > 1e-9
                 
-                if depth_diff > depth_tolerance:
-                    logger.info(f"Depth change detected for {account_name} on {asset}: current={current_depth}, target={target_depth}, diff={depth_diff:.6f}")
+                if depth_diff > depth_tolerance or leverage_changed:
+                    if depth_diff > depth_tolerance:
+                        logger.info(
+                            f"Depth change detected for {account_name} on {asset}: "
+                            f"current={current_depth}, target={target_depth}, diff={depth_diff:.6f}"
+                        )
+                    if leverage_changed:
+                        logger.info(
+                            f"Leverage change detected for {account_name} on {asset}: "
+                            f"current={float(current_leverage):.4f}, target={float(target_leverage):.4f}"
+                        )
                     has_updates = True
                     new_depths[account_name][asset] = target_depth
-                    self._changed_symbols[account_name].append(asset)  # Track this symbol changed
+                    if asset not in self._changed_symbols[account_name]:
+                        self._changed_symbols[account_name].append(asset)  # Track this symbol changed
                     # Mark all sources for this asset as needing updates
                     # Find symbol config for this asset - use default empty list if not found
-                    symbol_config = next(
-                        (sc for sc in self.config if sc['symbol'] == asset),
-                        None
-                    )
                     if symbol_config:
                         for source_config in symbol_config.get('sources', []):
                             updates[source_config['source']] = True
@@ -465,10 +595,12 @@ class SignalManager:
         
         if has_updates:
             self._temp_depths = new_depths
+            self._temp_leverages = new_leverages
             logger.info(f"Updates needed: {new_depths}")
         else:
             # Keep canonicalized/normalized keys even when unchanged.
             self._temp_depths = new_depths
+            self._temp_leverages = new_leverages
             #logger.info("No depth changes detected")
         
         return updates
@@ -479,6 +611,18 @@ class SignalManager:
         if resolved is None:
             return []
         return self._changed_symbols.get(resolved, [])
+
+    def get_target_leverage(self, account_name: str, symbol: str, fallback: float = 1.0) -> int:
+        """Return target leverage for account/symbol from latest weighted signals."""
+        resolved = self._resolve_account_key(account_name, self._temp_leverages)
+        if resolved is None:
+            return max(1, int(round(float(fallback or 1.0))))
+        account_map = self._temp_leverages.get(resolved, {})
+        leverage = self._parse_positive_leverage(
+            account_map.get(symbol),
+            fallback=float(fallback or 1.0),
+        )
+        return max(1, int(round(float(leverage or 1.0))))
     
     async def confirm_execution(self, account_name: str, success: bool):
         """Confirm successful execution for an account and update its cache."""
@@ -488,6 +632,7 @@ class SignalManager:
                 if resolved_name is not None:
                     async with self._cache_lock:
                         current_cache = self._load_cache()
+                        current_leverage_cache = self._load_leverage_cache()
                         canonical = self._canonical_account_name(resolved_name)
 
                         # Remove stale legacy exchange-only aliases after migration to
@@ -500,14 +645,22 @@ class SignalManager:
                                 key_name = self._canonical_account_name(key)
                                 if "::" not in key_name and self._canonical_account_name(key_name) == resolved_exchange:
                                     current_cache.pop(key, None)
+                                    current_leverage_cache.pop(key, None)
 
                         # Remove stale aliases for same account key (e.g., BloFin vs blofin).
                         for key in list(current_cache.keys()):
                             if self._canonical_account_name(key) == canonical:
                                 current_cache.pop(key, None)
+                                current_leverage_cache.pop(key, None)
                         current_cache[resolved_name] = self._temp_depths[resolved_name]
+                        current_leverage_cache[resolved_name] = self._temp_leverages.get(
+                            resolved_name,
+                            {},
+                        )
                         self.account_asset_depths = current_cache
+                        self.account_asset_leverages = current_leverage_cache
                         await self._save_cache()
+                        await self._save_leverage_cache()
                         logger.info(f"Updated cache for {resolved_name}")
         except Exception as e:
             logger.error(f"Error updating cache for {account_name}: {str(e)}")
@@ -523,10 +676,12 @@ class SignalManager:
                 self.previous_signals[resolved_name] = {}
 
             current_cache = self._load_cache()
+            current_leverage_cache = self._load_leverage_cache()
             canonical = self._canonical_account_name(resolved_name)
             for key in list(current_cache.keys()):
                 if self._canonical_account_name(key) == canonical:
                     current_cache.pop(key, None)
+                    current_leverage_cache.pop(key, None)
 
             if "::" in resolved_name:
                 resolved_exchange = self._canonical_account_name(str(resolved_name).partition("::")[0])
@@ -534,8 +689,15 @@ class SignalManager:
                     key_name = self._canonical_account_name(key)
                     if "::" not in key_name and key_name == resolved_exchange:
                         current_cache.pop(key, None)
+                        current_leverage_cache.pop(key, None)
 
             current_cache[resolved_name] = self._temp_depths[resolved_name]
+            current_leverage_cache[resolved_name] = self._temp_leverages.get(
+                resolved_name,
+                {},
+            )
             self.account_asset_depths = current_cache
+            self.account_asset_leverages = current_leverage_cache
             await self._save_cache()
+            await self._save_leverage_cache()
             logger.info(f"Updated cache for {resolved_name}")

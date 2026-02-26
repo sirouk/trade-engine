@@ -1,0 +1,50 @@
+{
+    "BloFin": {
+        "BTCUSDT": 5.0,
+        "ETHUSDT": 5.0,
+        "BNBUSDT": 5.0,
+        "XRPUSDT": 5.0,
+        "SOLUSDT": 5.0,
+        "ADAUSDT": 5.0,
+        "DOGEUSDT": 5.0,
+        "AVAXUSDT": 5.0,
+        "LINKUSDT": 5.0,
+        "SUIUSDT": 5.0,
+        "XLMUSDT": 5.0,
+        "LTCUSDT": 5.0,
+        "1000PEPEUSDT": 5.0,
+        "1000BONKUSDT": 5.0
+    },
+    "Hyperliquid::sirouk": {
+        "BTCUSDT": 5.0,
+        "ETHUSDT": 5.0,
+        "BNBUSDT": 5.0,
+        "XRPUSDT": 5.0,
+        "SOLUSDT": 5.0,
+        "ADAUSDT": 5.0,
+        "DOGEUSDT": 5.0,
+        "AVAXUSDT": 5.0,
+        "LINKUSDT": 5.0,
+        "SUIUSDT": 5.0,
+        "XLMUSDT": 5.0,
+        "LTCUSDT": 5.0,
+        "1000PEPEUSDT": 5.0,
+        "1000BONKUSDT": 5.0
+    },
+    "ByBit": {
+        "BTCUSDT": 5.0,
+        "ETHUSDT": 5.0,
+        "BNBUSDT": 5.0,
+        "XRPUSDT": 5.0,
+        "SOLUSDT": 5.0,
+        "ADAUSDT": 5.0,
+        "DOGEUSDT": 5.0,
+        "AVAXUSDT": 5.0,
+        "LINKUSDT": 5.0,
+        "SUIUSDT": 5.0,
+        "XLMUSDT": 5.0,
+        "LTCUSDT": 5.0,
+        "1000PEPEUSDT": 5.0,
+        "1000BONKUSDT": 5.0
+    }
+}

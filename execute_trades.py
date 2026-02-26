@@ -372,7 +372,11 @@ class TradeExecutor:
             position_value = total_value * depth  # depth is already weighted
 
             # Calculate raw quantity based on leverage
-            leverage = symbol_config.get('leverage', 1)
+            leverage = self.signal_manager.get_target_leverage(
+                account_name=account_key,
+                symbol=signal_symbol,
+                fallback=symbol_config.get('leverage', 1),
+            )
             notional_value = position_value * leverage  # Total position value including leverage
             quantity = notional_value / price  # Convert to asset quantity
 
@@ -466,7 +470,11 @@ class TradeExecutor:
                     task = account.reconcile_position(
                         symbol=exchange_symbol,
                         size=0,
-                        leverage=symbol_config.get('leverage', 1),
+                        leverage=self.signal_manager.get_target_leverage(
+                            account_name=account_key,
+                            symbol=signal_symbol,
+                            fallback=symbol_config.get('leverage', 1),
+                        ),
                         margin_mode="isolated"
                     )
                     tasks.append(task)
