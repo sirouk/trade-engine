@@ -38,3 +38,4 @@ asset_mapping_config.json
 
 bittensor_processor_config.json
 execute_trades_backup_*.py
+account_asset_leverages.json
