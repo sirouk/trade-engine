@@ -7,6 +7,7 @@ parameters.
 """
 import asyncio
 import datetime
+import os
 from typing import Optional
 
 from account_processors.ccxt_processor import CCXTProcessor
@@ -35,6 +36,7 @@ class HyperliquidProcessor(CCXTProcessor):
         self,
         ccxt_credentials: CCXTCredentials = None,
         exchange_name: str = "hyperliquid",
+        account_name: Optional[str] = None,
         main_wallet: Optional[str] = None,
         agent_wallet: Optional[str] = None,
         private_key: Optional[str] = None,
@@ -57,13 +59,28 @@ class HyperliquidProcessor(CCXTProcessor):
                 if not all_credentials.ccxt_list:
                     raise ValueError("No CCXT exchange configured. Add Hyperliquid to CCXT credentials first.")
 
+                normalized_target_account = str(account_name or "").strip().lower()
                 match = None
                 for cred in all_credentials.ccxt_list:
-                    if cred.exchange_name.lower() == exchange_name.lower():
+                    if cred.exchange_name.lower() != exchange_name.lower():
+                        continue
+                    if normalized_target_account:
+                        resolved_account_name = (
+                            getattr(cred, "account_name", "") or cred.exchange_name or ""
+                        ).strip().lower()
+                        if resolved_account_name != normalized_target_account:
+                            continue
                         match = cred
                         break
+                    match = cred
+                    break
 
                 if match is None:
+                    if normalized_target_account:
+                        raise ValueError(
+                            f"No CCXT credentials found for exchange '{exchange_name}' "
+                            f"and account '{account_name}'."
+                        )
                     raise ValueError(f"No CCXT credentials found for exchange '{exchange_name}'.")
 
                 ccxt_credentials = match
@@ -86,18 +103,16 @@ class HyperliquidProcessor(CCXTProcessor):
         # Conservative request concurrency for perps routing + signing operations.
         self.MAX_CONCURRENT_SYMBOL_REQUESTS = 3
 
-        # Hyperliquid credential semantics:
-        # - ccxt_credentials.api_key: main wallet address
-        # - ccxt_credentials.api_secret: private key
-        # - ccxt_credentials.api_passphrase: agent wallet address (optional)
-        self.main_wallet = self._normalize_wallet_address(self.credentials.api_key)
+        # Hyperliquid credential semantics live behind explicit aliases on CCXTCredentials
+        # so the shared CCXT field names stay readable in Hyperliquid-specific code.
+        self.main_wallet = self._normalize_wallet_address(self.credentials.hyperliquid_main_wallet)
         self.agent_wallet = self._normalize_wallet_address(
-            getattr(self.credentials, "api_passphrase", "") or agent_wallet
+            self.credentials.hyperliquid_agent_wallet or agent_wallet
         )
 
         # CCXT Hyperliquid expects walletAddress/privateKey on exchange instance.
         self.exchange.walletAddress = self.main_wallet
-        self.exchange.privateKey = self.credentials.api_secret
+        self.exchange.privateKey = self.credentials.hyperliquid_private_key
         self.exchange.options["walletAddress"] = self.main_wallet
         self.exchange.options.setdefault("defaultSlippage", "0.05")
         self.exchange.options["builderFee"] = False
@@ -933,8 +948,10 @@ class HyperliquidProcessor(CCXTProcessor):
 
 async def main():
     start_time = datetime.datetime.now()
+    account_name = os.environ.get("HYPERLIQUID_ACCOUNT_NAME", "").strip() or None
     processor = HyperliquidProcessor(
         exchange_name="hyperliquid",
+        account_name=account_name,
     )
     await processor.test_balance_and_positions()
     await processor.test_symbol_formats()
