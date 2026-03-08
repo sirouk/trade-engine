@@ -53,7 +53,13 @@ class BingXCredentials:
 
 @dataclass
 class CCXTCredentials:
-    """Generic CCXT credentials for any supported exchange"""
+    """Generic CCXT credentials for any supported exchange.
+
+    Hyperliquid reuses the shared field names with these semantics:
+    - api_key: main wallet address
+    - api_secret: private key for the generated API/agent wallet
+    - api_passphrase: generated API/agent wallet address
+    """
     exchange_name: str
     api_key: str
     api_secret: str
@@ -63,6 +69,18 @@ class CCXTCredentials:
     leverage_override: int = 0
     enabled: bool = True
     copy_trading: bool = False  # Flag for copy trading accounts
+
+    @property
+    def hyperliquid_main_wallet(self) -> str:
+        return self.api_key
+
+    @property
+    def hyperliquid_private_key(self) -> str:
+        return self.api_secret
+
+    @property
+    def hyperliquid_agent_wallet(self) -> str:
+        return self.api_passphrase
 
 @dataclass
 class Credentials:
@@ -580,10 +598,10 @@ def ensure_ccxt_credentials(credentials: Credentials, skip_prompt: bool = False)
         )
 
         is_hyperliquid = exchange_name.lower() == "hyperliquid"
-        api_key_label = "wallet address" if is_hyperliquid else "API key"
+        api_key_label = "main wallet address" if is_hyperliquid else "API key"
         api_secret_label = "private key" if is_hyperliquid else "API secret"
         api_passphrase_label = (
-            "agent wallet address (optional)"
+            "generated API wallet address (optional)"
             if is_hyperliquid
             else "API passphrase"
         )
