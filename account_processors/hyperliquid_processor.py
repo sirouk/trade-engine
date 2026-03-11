@@ -758,6 +758,13 @@ class HyperliquidProcessor(CCXTProcessor):
         Reconcile the current position with target size/leverage/margin mode.
         """
         try:
+            self.last_reconcile_error = None
+            if not self.enabled and abs(float(size or 0)) > 0:
+                self.last_reconcile_error = (
+                    f"{self.log_prefix} Disabled accounts only support close-only reconciliation"
+                )
+                print(self.last_reconcile_error)
+                return False
             if self.leverage_override > 0:
                 leverage = self.leverage_override
 
@@ -869,8 +876,10 @@ class HyperliquidProcessor(CCXTProcessor):
             if order_result is None:
                 raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
             self._record_order_success(symbol)
+            self.last_reconcile_error = None
             return True
         except Exception as e:
+            self.last_reconcile_error = str(e)
             self._record_order_failure(symbol, e)
             print(f"{self.log_prefix} Error reconciling position: {str(e)}")
             return False

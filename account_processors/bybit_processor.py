@@ -51,6 +51,7 @@ class ByBit:
             cooldown_log_interval_seconds=15.0,
         )
         self.non_retriable_error_cooldown_seconds = 180.0
+        self.last_reconcile_error: str | None = None
 
         # Add logger prefix
         self.log_prefix = f"[{self.exchange_name}]"
@@ -360,7 +361,9 @@ class ByBit:
                 min_size = float(instrument["lotSizeFilter"]["minOrderQty"])
                 max_size = float(instrument["lotSizeFilter"]["maxOrderQty"])
                 tick_size = float(instrument["priceFilter"]["tickSize"])
-                contract_value = float(lot_size / min_size)  # Optional fallback
+                # Bybit linear perps use base-asset quantity directly for `qty`.
+                # Keep contract value at 1.0 so size scaling remains base-quantity based.
+                contract_value = 1.0
 
                 return lot_size, min_size, tick_size, contract_value, max_size
         raise ValueError(f"Symbol {symbol} not found.")
@@ -685,6 +688,13 @@ class ByBit:
         If the position flips from long to short or vice versa, the current position is closed first.
         """
         try:
+            self.last_reconcile_error = None
+            if not self.enabled and abs(float(size or 0)) > 0:
+                self.last_reconcile_error = (
+                    f"{self.log_prefix} Disabled accounts only support close-only reconciliation"
+                )
+                print(self.last_reconcile_error)
+                return False
             # Use leverage override if set
             if self.leverage_override > 0:
                 print(f"{self.log_prefix} Using exchange-specific leverage override: {self.leverage_override}")
@@ -808,8 +818,10 @@ class ByBit:
             if order_result is None:
                 raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
             self._record_order_success(symbol)
+            self.last_reconcile_error = None
             return True
         except Exception as e:
+            self.last_reconcile_error = str(e)
             self._record_order_failure(symbol, e)
             print(f"{self.log_prefix} Error reconciling position: {str(e)}")
             return False

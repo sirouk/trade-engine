@@ -55,6 +55,7 @@ class KuCoin:
             cooldown_log_interval_seconds=15.0,
         )
         self.non_retriable_error_cooldown_seconds = 180.0
+        self.last_reconcile_error: str | None = None
         
         # Add logger prefix
         self.log_prefix = f"[{self.exchange_name}]"
@@ -529,8 +530,13 @@ class KuCoin:
         Reconcile the current position with the target size, leverage, and margin mode.
         """
         try:
-            if not self.enabled:
-                return True
+            self.last_reconcile_error = None
+            if not self.enabled and abs(float(size or 0)) > 0:
+                self.last_reconcile_error = (
+                    f"{self.log_prefix} Disabled accounts only support close-only reconciliation"
+                )
+                print(self.last_reconcile_error)
+                return False
 
             print(f"{self.log_prefix} Reconciling KuCoin position with initial leverage: {leverage}")
             print(f"{self.log_prefix} Current leverage override setting: {self.leverage_override}")
@@ -661,8 +667,10 @@ class KuCoin:
             if order_result is None:
                 raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
             self._record_order_success(symbol)
+            self.last_reconcile_error = None
             return True
         except Exception as e:
+            self.last_reconcile_error = str(e)
             self._record_order_failure(symbol, e)
             print(f"{self.log_prefix} Error reconciling position: {str(e)}")
             return False

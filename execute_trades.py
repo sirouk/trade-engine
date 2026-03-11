@@ -18,6 +18,7 @@ from account_processors.hyperliquid_processor import HyperliquidProcessor
 
 from core.signal_manager import SignalManager
 from config.credentials import load_ccxt_credentials
+from core.utils.disabled_account_guard import DisabledAccountGuard
 
 
 logging.basicConfig(
@@ -32,6 +33,7 @@ class TradeExecutor:
     ASSET_MAPPING_CONFIG = "asset_mapping_config.json"
     FAILURE_RETRY_BASE_SECONDS = 5
     FAILURE_RETRY_MAX_SECONDS = 60
+    DISABLED_ACCOUNT_QUARANTINE_AFTER_FAILURES = 4
     
     # Note: Rate limiting is now per-exchange (set in each account processor's __init__)
     # Each exchange has its own MAX_CONCURRENT_SYMBOL_REQUESTS based on their API limits
@@ -229,6 +231,11 @@ class TradeExecutor:
 
         # Track retry pacing for accounts that repeatedly fail to execute updates.
         self._account_retry_state = {}
+        self._disabled_account_guard = DisabledAccountGuard(
+            base_delay_seconds=self.FAILURE_RETRY_BASE_SECONDS,
+            max_delay_seconds=self.FAILURE_RETRY_MAX_SECONDS,
+            quarantine_after_failures=self.DISABLED_ACCOUNT_QUARANTINE_AFTER_FAILURES,
+        )
         self._next_cycle_sleep = None
         
         # Add CCXT exchanges if configured
@@ -320,6 +327,80 @@ class TradeExecutor:
             logger.warning(
                 f"{account_key}: execution failed, retry in {delay:.1f}s (failures={state['failures']})"
             )
+
+    @staticmethod
+    def _is_auth_or_permission_error(error_msg: str | None) -> bool:
+        msg = str(error_msg or "").strip().lower()
+        if not msg:
+            return False
+        auth_tokens = (
+            "api key",
+            "invalid key",
+            "invalid api",
+            "unauthorized",
+            "not authorized",
+            "permission",
+            "forbidden",
+            "signature",
+            "auth",
+            "authentication",
+            "access denied",
+            "permission denied",
+        )
+        return any(token in msg for token in auth_tokens)
+
+    @staticmethod
+    def _error_signature(error_msg: str | None) -> str:
+        return " ".join(str(error_msg or "").strip().split()).lower()[:256]
+
+    def _can_attempt_disabled_account(self, account_key: str) -> bool:
+        can_attempt, retry_in = self._disabled_account_guard.can_attempt(account_key)
+        if can_attempt:
+            return True
+
+        state = self._disabled_account_guard.state(account_key)
+        should_log, suppressed = self._disabled_account_guard.should_log_skip(account_key)
+        if should_log:
+            if state.quarantined:
+                suppressed_note = (
+                    f" ({suppressed} suppressed skips)"
+                    if suppressed > 0
+                    else ""
+                )
+                logger.warning(
+                    f"{account_key}: disabled account is quarantined after auth failures; "
+                    f"skipping close-only API attempts{suppressed_note}"
+                )
+            else:
+                suppressed_note = (
+                    f" ({suppressed} suppressed skips)"
+                    if suppressed > 0
+                    else ""
+                )
+                logger.warning(
+                    f"{account_key}: disabled account close-only retry cooling down for "
+                    f"{retry_in:.1f}s{suppressed_note}"
+                )
+        return False
+
+    def _record_disabled_account_success(self, account_key: str):
+        self._disabled_account_guard.record_success(account_key)
+
+    def _record_disabled_account_auth_failure(self, account_key: str, error_msg: str):
+        quarantined, retry_in, failures = self._disabled_account_guard.record_auth_failure(
+            account_key,
+            error_signature=self._error_signature(error_msg),
+        )
+        if quarantined:
+            logger.warning(
+                f"{account_key}: disabled account entered in-memory quarantine after "
+                f"{failures} auth failures"
+            )
+            return
+        logger.warning(
+            f"{account_key}: disabled account auth failure (failures={failures}); "
+            f"retrying close-only flow in {retry_in:.1f}s"
+        )
         
     async def get_signals(self) -> Dict:
         """Fetch and combine signals from all sources."""
@@ -441,6 +522,7 @@ class TradeExecutor:
             if not account.enabled:
                 # Check if account has any non-zero positions in cache
                 has_open_positions = False
+                account_depths = {}
                 try:
                     with open('account_asset_depths.json', 'r') as f:
                         depths_cache = json.load(f)
@@ -453,50 +535,80 @@ class TradeExecutor:
                 if not has_open_positions:
                     logger.info(f"Skipping disabled account {account_key}: no open positions")
                     return True, None
-                
-                # Only process symbols that actually have positions
-                symbols_with_positions = [
-                    config for config in self.weight_config 
-                    if float(account_depths.get(config['symbol'], 0)) != 0
-                ]
-                
-                logger.info(f"Processing disabled account {account_key}: closing {len(symbols_with_positions)} open positions: {', '.join(c['symbol'] for c in symbols_with_positions)}")
-                
-                # Process only symbols with positions, set them to zero
-                tasks = []
-                for symbol_config in symbols_with_positions:
-                    signal_symbol = symbol_config['symbol']
-                    exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
-                    task = account.reconcile_position(
-                        symbol=exchange_symbol,
-                        size=0,
-                        leverage=self.signal_manager.get_target_leverage(
-                            account_name=account_key,
-                            symbol=signal_symbol,
-                            fallback=symbol_config.get('leverage', 1),
-                        ),
-                        margin_mode="isolated"
+
+                open_symbols = sorted(
+                    symbol
+                    for symbol, depth in account_depths.items()
+                    if float(depth) != 0
+                )
+                if not open_symbols:
+                    logger.info(f"Skipping disabled account {account_key}: no open positions")
+                    return True, None
+
+                if not self._can_attempt_disabled_account(account_key):
+                    return False, (
+                        f"{account_key} disabled-close skipped due to retry cooldown or quarantine"
                     )
-                    tasks.append(task)
-                
-                # Wait for all positions to be set to zero in parallel
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Treat the disabled account update as atomic: only confirm cache when all
-                # closes succeeded. Any failed call leaves cache unchanged for retry.
-                errors = [r for r in results if isinstance(r, Exception)]
-                failed = [r for r in results if r is False]
-                account_success = (not errors) and (not failed)
 
-                # Update cache after setting all positions to zero
-                await self.signal_manager.confirm_execution(account_key, account_success)
+                logger.info(
+                    f"Processing disabled account {account_key}: closing "
+                    f"{len(open_symbols)} open positions: {', '.join(open_symbols)}"
+                )
+
+                symbol_config_by_symbol = {
+                    config['symbol']: config
+                    for config in self.weight_config
+                }
+                failed_errors: list[str] = []
+                auth_error: str | None = None
+
+                # Disabled accounts are intentionally processed sequentially so per-call
+                # error context stays deterministic and we do not burst dead credentials.
+                for signal_symbol in open_symbols:
+                    symbol_config = symbol_config_by_symbol.get(signal_symbol, {})
+                    exchange_symbol = account.map_signal_symbol_to_exchange(signal_symbol)
+                    leverage_fallback = symbol_config.get('leverage', 1)
+                    if hasattr(account, "last_reconcile_error"):
+                        account.last_reconcile_error = None
+
+                    try:
+                        reconcile_result = await account.reconcile_position(
+                            symbol=exchange_symbol,
+                            size=0,
+                            leverage=self.signal_manager.get_target_leverage(
+                                account_name=account_key,
+                                symbol=signal_symbol,
+                                fallback=leverage_fallback,
+                            ),
+                            margin_mode="isolated"
+                        )
+                        if reconcile_result is True:
+                            continue
+                        error_msg = getattr(account, "last_reconcile_error", None)
+                    except Exception as e:
+                        reconcile_result = False
+                        error_msg = str(e)
+
+                    if reconcile_result is False:
+                        error_msg = error_msg or (
+                            f"{account_key} reconcile_position returned False for {exchange_symbol}"
+                        )
+                        failed_errors.append(error_msg)
+                        if auth_error is None and self._is_auth_or_permission_error(error_msg):
+                            auth_error = error_msg
+                            break
+
+                account_success = not failed_errors
                 if account_success:
+                    self._record_disabled_account_success(account_key)
+                    await self.signal_manager.confirm_execution(account_key, True)
                     logger.info(f"{account_key}: disabled account positions closed successfully")
-                    return True, None  # Return True since we successfully set positions to zero
+                    return True, None
 
+                if auth_error:
+                    self._record_disabled_account_auth_failure(account_key, auth_error)
                 logger.warning(
-                    f"{account_key}: disabled account close had {len(errors)} errors and "
-                    f"{len(failed)} failed results"
+                    f"{account_key}: disabled account close had {len(failed_errors)} failures"
                 )
                 return False, f"{account_key} had disabled-close failures"
                 

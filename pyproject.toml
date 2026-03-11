@@ -47,6 +47,11 @@ dependencies = [
     "ccxt[async]",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
 
 [project.scripts]
 sample = "sample:main"
@@ -54,3 +59,7 @@ sample = "sample:main"
 
 [tool.setuptools]
 packages = ["config", "core", "signal_processors"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

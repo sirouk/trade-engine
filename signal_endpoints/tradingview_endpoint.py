@@ -25,6 +25,8 @@ class TradingViewSignal(BaseModel):
     takeprofit: str = Field("0.0", json_schema_extra={"hidden": True})
     trailstop: str = Field("0.0", json_schema_extra={"hidden": True})
     price: str = Field("0.0", description="Signal price at time of alert")
+    signal_seq: str = Field("", json_schema_extra={"hidden": True})
+    event_id: str = Field("", json_schema_extra={"hidden": True})
 
     @field_validator("direction")
     @classmethod

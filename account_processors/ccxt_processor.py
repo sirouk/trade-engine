@@ -109,6 +109,7 @@ class CCXTProcessor:
             cooldown_log_interval_seconds=15.0,
         )
         self.non_retriable_error_cooldown_seconds = 180.0
+        self.last_reconcile_error: str | None = None
 
         # Distinguish duplicate CCXT accounts (e.g., multiple Hyperliquid wallets).
         self.account_name = (getattr(self.credentials, "account_name", "") or self.exchange_name).strip()
@@ -622,6 +623,13 @@ class CCXTProcessor:
         Reconcile the current position with the target size, leverage, and margin mode.
         """
         try:
+            self.last_reconcile_error = None
+            if not self.enabled and abs(float(size or 0)) > 0:
+                self.last_reconcile_error = (
+                    f"{self.log_prefix} Disabled accounts only support close-only reconciliation"
+                )
+                print(self.last_reconcile_error)
+                return False
             # Use leverage override if set
             if self.leverage_override > 0:
                 leverage = self.leverage_override
@@ -804,8 +812,10 @@ class CCXTProcessor:
             if order_result is None:
                 raise RuntimeError(f"{self.log_prefix} Market adjust order failed for {symbol}")
             self._record_order_success(symbol)
+            self.last_reconcile_error = None
             return True
         except Exception as e:
+            self.last_reconcile_error = str(e)
             self._record_order_failure(symbol, e)
             return False
 
